@@ -40,6 +40,48 @@ def _bearing(lon1, lat1, lon2, lat2):
     return 90 - met_bearing
 
 
+def estimate_rmax_wr04(vmax_ms, lats):
+    """
+    Empirical radius of maximum wind from Willoughby & Rahn (2004) Eq. 8.
+
+    Parameters
+    ----------
+    vmax_ms : array-like, m/s
+    lats    : array-like, degrees
+
+    Returns
+    -------
+    rmax_km : ndarray, km
+    """
+    vmax_ms = np.asarray(vmax_ms, dtype=float)
+    lats = np.asarray(lats, dtype=float)
+    return 51.6 * np.exp(-0.0223 * vmax_ms + 0.0281 * np.abs(lats))
+
+
+def fill_rmax_gaps(rmax_km, vmax_ms, lats):
+    """
+    Fill NaN values in rmax_km using the Willoughby & Rahn (2004) formula.
+
+    Parameters
+    ----------
+    rmax_km : array-like, km  (NaN where observation is missing)
+    vmax_ms : array-like, m/s
+    lats    : array-like, degrees
+
+    Returns
+    -------
+    rmax_km : ndarray, km  (NaNs replaced with WR04 estimates)
+    """
+    rmax_km = np.asarray(rmax_km, dtype=float).copy()
+    vmax_ms = np.asarray(vmax_ms, dtype=float)
+    lats = np.asarray(lats, dtype=float)
+
+    nan_mask = np.isnan(rmax_km)
+    if nan_mask.any():
+        rmax_km[nan_mask] = estimate_rmax_wr04(vmax_ms[nan_mask], lats[nan_mask])
+    return rmax_km
+
+
 def storm_motion(lons, lats, times):
     """
     Compute storm translation speed [m/s] and direction [math degrees, 0=East]
