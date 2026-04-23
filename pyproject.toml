@@ -17,6 +17,11 @@ dependencies = [
     "tqdm",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EmilioEchevarria/tcwindfields"
+Repository = "https://github.com/EmilioEchevarria/tcwindfields"
+Issues = "https://github.com/EmilioEchevarria/tcwindfields/issues"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["tcwindfields*"]
