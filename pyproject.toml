@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tcwindfields"
+version = "0.1.0"
+description = "Parametric tropical cyclone 2D wind and pressure fields"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "scipy",
+    "shapely",
+    "xarray",
+    "pandas",
+    "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tcwindfields*"]
