@@ -10,6 +10,10 @@ save as NetCDF.
 
 **Pressure model:** Holland (1980) radial profile with the Willoughby & Rahn (2004) empirical B parameter.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/EmilioEchevarria/tcwindfields/main/assets/TC_Alfred_winds.gif" width="70%"/>
+</p>
+
 ---
 
 ## Installation
