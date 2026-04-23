@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "tcwindfields"
 version = "0.1.0"
 description = "Parametric tropical cyclone 2D wind and pressure fields"
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "numpy",
