@@ -26,7 +26,7 @@ pip install tcwindfields
 
 ---
 
-## Quick start — TC Alfred (2025)
+## Example: TC Alfred (2025)
 
 ```python
 import urllib.request, pathlib
@@ -91,6 +91,8 @@ ds_wnd.to_netcdf('Alfred_2025_TC_winds_CLE15.nc')
 
 Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 
+#### `Input variables:`
+
 | Parameter | Type | Units | Description |
 |-----------|------|-------|-------------|
 | `times` | `np.datetime64` array | — | Track times |
@@ -103,17 +105,22 @@ Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 | `lats_grid` | 1-D float array | degrees N | Output grid |
 | `interp_interval` | str or None | — | e.g. `'20min'`, `'1h'`; `None` = no interpolation |
 
-Output variables: `uwnd` (m/s), `vwnd` (m/s), `pres` (Pa).
+#### `Output variables:` 
+
+`uwnd` (m/s), `vwnd` (m/s), `pres` (Pa).
+
 
 ### `tcwf.fill_rmax_gaps(rmax_km, vmax_ms, lats)`
 
 Fill `NaN` values in a `rmax` array using the Willoughby & Rahn (2004)
 empirical formula. Observed values are kept unchanged.
 
+
 ### `tcwf.interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h')`
 
 Interpolate track arrays to a regular time step. Returns a dict with the
 same keys. Useful for pre-processing before calling `compute_tc_fields`.
+
 
 ### `tcwf.input_units()`
 
