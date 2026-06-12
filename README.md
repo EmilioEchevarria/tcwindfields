@@ -6,7 +6,8 @@ Given a TC track (position, intensity, size), `tcwindfields` produces gridded
 `uwnd`, `vwnd` [m/s] and `pres` [Pa] fields as an `xarray.Dataset` ready to
 save as NetCDF.
 
-**Wind model:** Chavas, Lin & Emanuel (2015) CLE15, merging the Emanuel & Rotunno (2011) inner-region solution with the Emanuel (2004) outer-region solution.
+**Wind models:** Chavas, Lin & Emanuel (2015) CLE15 (default), or Holland (1980) 
+(selectable via `wind_model='cle15'` / `wind_model='holland'`).
 
 **Pressure model:** Holland (1980) radial profile with the Willoughby & Rahn (2004) empirical B parameter.
 
@@ -53,16 +54,15 @@ ds_tc  = ds_ib.isel(storm=idx)
 lons_tc = np.array(ds_tc['lon'])
 lats_tc = np.array(ds_tc['lat'])
 time_tc = np.array(ds_tc['time'])
-vmax_tc = np.array(ds_tc['bom_wind']) / 1.94384   # knots  → m/s
-pmin_tc = np.array(ds_tc['bom_pres'])              # hPa
-rmax_tc = np.array(ds_tc['bom_rmw'])  * 1.852      # n mi   → km
+vmax_tc = np.array(ds_tc['bom_wind']) / 1.94384 # knots --> m/s
+pmin_tc = np.array(ds_tc['bom_pres'])           # hPa
+rmax_tc = np.array(ds_tc['bom_rmw'])  * 1.852   # n mi  --> km
 
 # Fill RMW gaps with Willoughby & Rahn (2004)
 rmax_tc = tcwf.fill_rmax_gaps(rmax_tc, vmax_tc, lats_tc)
 
 # Drop rows with missing position / intensity
-valid = ~(np.isnan(lons_tc) | np.isnan(lats_tc)
-        | np.isnan(vmax_tc) | np.isnan(pmin_tc))
+valid = ~(np.isnan(lons_tc) | np.isnan(lats_tc) | np.isnan(vmax_tc) | np.isnan(pmin_tc))
 lons_tc, lats_tc, time_tc = lons_tc[valid], lats_tc[valid], time_tc[valid]
 vmax_tc, pmin_tc, rmax_tc = vmax_tc[valid], pmin_tc[valid], rmax_tc[valid]
 
@@ -82,7 +82,7 @@ ds_wnd = tcwf.compute_tc_fields(
     lons_grid, lats_grid,
     interp_interval='1h',
 )
-ds_wnd.to_netcdf('Alfred_2025_TC_winds_CLE15.nc')
+ds_wnd.to_netcdf('Alfred_2025_TC_winds.nc')
 ```
 
 ---
@@ -104,6 +104,7 @@ Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 | `lons_grid` | 1-D float array | degrees E | Output grid |
 | `lats_grid` | 1-D float array | degrees N | Output grid |
 | `interp_interval` | str or None | — | e.g. `'20min'`, `'1h'`; `None` = no interpolation |
+| `wind_model` | str | — | `'cle15'` (default) or `'holland'` |
 
 #### `Output variables:` 
 
