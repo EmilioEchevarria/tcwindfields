@@ -62,7 +62,7 @@ def holland_wind_profile(vmax_ms, pmin_hpa, rmax_km, lat, beta, p_env_hpa=1013.0
         return np.array([0.0, rmax_km * 20]), np.zeros(2)
 
     rmax_m = rmax_km * 1000.0
-    rr_km = np.arange(0.5, 1000.5, 0.5)
+    rr_km = np.arange(0.5, 1500.5, 0.5)
     rr_m = rr_km * 1000.0
 
     x = (rmax_m / rr_m) ** beta
@@ -70,6 +70,11 @@ def holland_wind_profile(vmax_ms, pmin_hpa, rmax_km, lat, beta, p_env_hpa=1013.0
                   + (rr_m * fcor / 2.0) ** 2)
           - rr_m * fcor / 2.0)
     VV = np.maximum(VV, 0.0)
+
+    # Rescale so the profile peak matches the observed vmax
+    peak = VV.max()
+    if peak > 0:
+        VV = VV * (vmax_ms / peak)
 
     # Truncate beyond where winds fall below 0.5 m/s (after the peak)
     i_peak = np.argmax(VV)
