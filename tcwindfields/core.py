@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 from tqdm import tqdm
 
 from ._utils import storm_motion, coriolis
-from ._fields import cle15_wind_profile, wind_field_2d
+from ._fields import cle15_wind_profile, holland_wind_profile, wind_field_2d
 from ._holland import beta_model, calc_pressure_profile, pressure_field_2d
 
 
@@ -61,6 +61,8 @@ def interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h'):
 def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
                        lons_grid, lats_grid,
                        interp_interval='20min',
+                       wind_model='cle15',
+                       p_env_hpa=1013.0,
                        verbose=True,
                        **cle15_kwargs):
     """
@@ -79,10 +81,16 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     interp_interval : str or None
         Interpolate track to this time step before computing (e.g. '20min',
         '1h').  Pass None to skip interpolation and use input data as-is.
+    wind_model : str
+        Radial wind profile model. Options:
+            'cle15'   --> Chavas, Lin & Emanuel (2015)  [default]
+            'holland' --> Holland (1980)
+            (hopefully others to come soon)
+    p_env_hpa : float, env. pressure in hPa, used by Holland model. Default 1013.
     verbose : bool
         Show tqdm progress bar.
     **cle15_kwargs
-        Optional overrides for CLE15 model parameters:
+        Optional overrides for CLE15 model parameters (ignored when wind_model='holland'):
         Cdvary, C_d, w_cool, CkCdvary, CkCd, eye_adj, alpha_eye.
 
     Returns
@@ -127,11 +135,16 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     vwnd_out = np.zeros((nt, nlat, nlon), dtype=np.float32)
     pres_out = np.zeros((nt, nlat, nlon), dtype=np.float32)
 
+    if wind_model not in ('cle15', 'holland'):
+        raise ValueError(f"wind_model must be 'cle15' or 'holland', got '{wind_model}'")
+
     iterator = tqdm(range(nt)) if verbose else range(nt)
     for T in iterator:
-        # CLE15 wind profile
-        rr_km, VV_ms, _ = cle15_wind_profile(vmax[T], rmax[T], lats[T],
-                                               **cle15_kwargs)
+        # Radial wind profile
+        if wind_model == 'cle15':
+            rr_km, VV_ms, _ = cle15_wind_profile(vmax[T], rmax[T], lats[T], **cle15_kwargs)
+        else:
+            rr_km, VV_ms = holland_wind_profile(vmax[T], pmin[T], rmax[T], lats[T], beta[T], p_env_hpa)
 
         U, V = wind_field_2d(rr_km, VV_ms, lons[T], lats[T],
                               spd_ms[T], dir_math[T],
@@ -139,7 +152,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
         uwnd_out[T] = U.astype(np.float32)
         vwnd_out[T] = V.astype(np.float32)
 
-        # Holland pressure profile
+        # Holland pressure profile (same for both wind models)
         rr_p, Pr_p = calc_pressure_profile(lats[T], pmin[T], vmax[T],
                                             rmax[T], beta[T])
         P2d = pressure_field_2d(lons[T], lats[T], rr_p, Pr_p,

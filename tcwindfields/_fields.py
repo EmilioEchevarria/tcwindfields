@@ -2,9 +2,10 @@ import numpy as np
 from ._utils import haversine_vectorized, coriolis
 from ._cle15 import ER11E04_nondim_rmaxinput
 
+_RHO_AIR = 1.15   # kg/m^3, Holland (1980)
 
-_CLE15_DEFAULTS = dict(Cdvary=0, C_d=1.5e-3, w_cool=2e-3, CkCdvary=0, CkCd=1,
-                        eye_adj=0, alpha_eye=0.15)
+
+_CLE15_DEFAULTS = dict(Cdvary=0, C_d=1.5e-3, w_cool=2e-3, CkCdvary=0, CkCd=1, eye_adj=0, alpha_eye=0.15)
 
 
 def cle15_wind_profile(vmax_ms, rmax_km, lat, **kwargs):
@@ -35,6 +36,52 @@ def cle15_wind_profile(vmax_ms, rmax_km, lat, **kwargs):
         p['eye_adj'], p['alpha_eye'],
     )
     return rr_m/1000, VV_ms, r0_m/1000
+
+
+def holland_wind_profile(vmax_ms, pmin_hpa, rmax_km, lat, beta, p_env_hpa=1013.0):
+    """
+    Holland (1980) radial gradient wind profile, reduced to surface.
+
+    Parameters
+    ----------
+    vmax_ms   : float, m/s
+    pmin_hpa  : float, hPa
+    rmax_km   : float, km
+    lat       : float, degrees
+    beta      : float, Holland B parameter
+    p_env_hpa : float, hPa  (environmental pressure, default 1013)
+
+    Returns
+    -------
+    rr_km : 1-D array, km
+    VV_ms : 1-D array, m/s
+    """
+    fcor = abs(coriolis(lat))
+    dp_pa = (p_env_hpa - pmin_hpa) * 100.0
+    if dp_pa <= 0:
+        return np.array([0.0, rmax_km * 20]), np.zeros(2)
+
+    rmax_m = rmax_km * 1000.0
+    rr_km = np.arange(0.5, 1000.5, 0.5)
+    rr_m = rr_km * 1000.0
+
+    x = (rmax_m / rr_m) ** beta
+    VV = (np.sqrt(beta / _RHO_AIR * x * dp_pa * np.exp(-x)
+                  + (rr_m * fcor / 2.0) ** 2)
+          - rr_m * fcor / 2.0)
+    VV = np.maximum(VV, 0.0)
+
+    # Truncate beyond where winds fall below 0.5 m/s (after the peak)
+    i_peak = np.argmax(VV)
+    below = np.where(VV[i_peak:] < 0.5)[0]
+    if below.size > 0:
+        cutoff = i_peak + below[0] + 1
+        rr_km = rr_km[:cutoff]
+        VV = VV[:cutoff]
+
+    rr_km = np.concatenate([[0.0], rr_km])
+    VV = np.concatenate([[0.0], VV])
+    return rr_km, VV
 
 
 def wind_field_2d(rr_km, VV_ms, tc_lon, tc_lat, storm_spd_ms, storm_ang_math,
