@@ -4,7 +4,6 @@ from ._cle15 import ER11E04_nondim_rmaxinput
 
 _RHO_AIR = 1.15   # kg/m^3, Holland (1980)
 
-
 _CLE15_DEFAULTS = dict(Cdvary=0, C_d=1.5e-3, w_cool=2e-3, CkCdvary=0, CkCd=1, eye_adj=0, alpha_eye=0.15)
 
 

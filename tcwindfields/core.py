@@ -73,7 +73,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     times : array-like of np.datetime64
     lons : array-like, degrees E
     lats : array-like, degrees N  (negative = Southern Hemisphere)
-    vmax : array-like, m/s  (10-min mean surface wind)
+    vmax : array-like, m/s  (10-min mean surface wind: the observed maximum of the moving storm)
     pmin : array-like, hPa  (minimum central pressure)
     rmax : array-like, km   (radius of maximum wind)
     lons_grid : 1-D array-like, degrees E
@@ -126,6 +126,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
 
     spd_ms, dir_math = storm_motion(lons, lats, times)
     beta = beta_model(times, lats, pmin, spd_ms)
+    vmax_sym = np.maximum(vmax - 0.55*spd_ms, 0.5*vmax)
 
     nt = len(times)
     nlat = len(lats_grid)
@@ -142,9 +143,9 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     for T in iterator:
         # Radial wind profile
         if wind_model == 'cle15':
-            rr_km, VV_ms, _ = cle15_wind_profile(vmax[T], rmax[T], lats[T], **cle15_kwargs)
+            rr_km, VV_ms, _ = cle15_wind_profile(vmax_sym[T], rmax[T], lats[T], **cle15_kwargs)
         else:
-            rr_km, VV_ms = holland_wind_profile(vmax[T], pmin[T], rmax[T], lats[T], beta[T], p_env_hpa)
+            rr_km, VV_ms = holland_wind_profile(vmax_sym[T], pmin[T], rmax[T], lats[T], beta[T], p_env_hpa)
 
         U, V = wind_field_2d(rr_km, VV_ms, lons[T], lats[T],
                               spd_ms[T], dir_math[T],
