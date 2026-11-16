@@ -8,6 +8,7 @@ from tqdm import tqdm
 from ._utils import storm_motion, coriolis
 from ._fields import cle15_wind_profile, holland_wind_profile, wind_field_2d
 from ._holland import beta_model, calc_pressure_profile, pressure_field_2d
+from ._terrain import land_effects
 
 
 def interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h'):
@@ -64,6 +65,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
                        wind_model='cle15',
                        p_env_hpa=1013.0,
                        verbose=True,
+                       terrain=None,
                        **cle15_kwargs):
     """
     Compute 2-D tropical cyclone wind and pressure fields for a full track.
@@ -89,6 +91,9 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     p_env_hpa : float, env. pressure in hPa, used by Holland model. Default 1013.
     verbose : bool
         Show tqdm progress bar.
+    terrain : xr.Dataset or None
+        Output of tcwf.terrain_features for the same grid. If given, the wind over land is changed for the
+        surface roughness, the land crossed upwind, hills and valleys, and turned towards the centre
     **cle15_kwargs
         Optional overrides for CLE15 model parameters (ignored when wind_model='holland'):
         Cdvary, C_d, w_cool, CkCdvary, CkCd, eye_adj, alpha_eye.
@@ -139,6 +144,11 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     if wind_model not in ('cle15', 'holland'):
         raise ValueError(f"wind_model must be 'cle15' or 'holland', got '{wind_model}'")
 
+    if terrain is not None:  # land effects, needs terrain features of the same grid
+        if not (np.allclose(terrain['lat'].values, lats_grid) and np.allclose(terrain['lon'].values, lons_grid)):
+            raise ValueError("terrain must come from terrain_features() on the same lons_grid, lats_grid")
+        terrain = {k: terrain[k].transpose('lat', 'lon', ...).values.astype(float) for k in terrain.data_vars}
+
     iterator = tqdm(range(nt)) if verbose else range(nt)
     for T in iterator:
         # Radial wind profile
@@ -150,6 +160,8 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
         U, V = wind_field_2d(rr_km, VV_ms, lons[T], lats[T],
                               spd_ms[T], dir_math[T],
                               lons_grid, lats_grid)
+        if terrain is not None:
+            U, V = land_effects(U, V, terrain, lats[T])
         uwnd_out[T] = U.astype(np.float32)
         vwnd_out[T] = V.astype(np.float32)
 
@@ -158,7 +170,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
                                             rmax[T], beta[T])
         P2d = pressure_field_2d(lons[T], lats[T], rr_p, Pr_p,
                                  lons_grid, lats_grid)
-        pres_out[T] = (P2d * 100).astype(np.float32)  # hPa → Pa
+        pres_out[T] = (P2d * 100).astype(np.float32)  # hPa --> Pa
 
     ds = xr.Dataset(
         {

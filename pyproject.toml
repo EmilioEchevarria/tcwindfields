@@ -17,6 +17,9 @@ dependencies = [
     "tqdm",
 ]
 
+[project.optional-dependencies]
+terrain = ["rasterio"]      # terrain_features (land effects): reads the WorldCover and Copernicus DEM tiles
+
 [project.urls]
 Homepage = "https://github.com/EmilioEchevarria/tcwindfields"
 Repository = "https://github.com/EmilioEchevarria/tcwindfields"

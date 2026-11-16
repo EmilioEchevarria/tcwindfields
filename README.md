@@ -87,15 +87,15 @@ ds_wnd.to_netcdf('Alfred_2025_TC_winds.nc')
 
 ---
 
-### `tcwf.compute_tc_fields(...)`
+### --> tcwf.compute_tc_fields(...)
 
 Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 
-#### `Input variables:`
+#### Input variables:
 
 | Parameter | Type | Units | Description |
 |-----------|------|-------|-------------|
-| `times` | `np.datetime64` array | — | Track times |
+| `times` | `np.datetime64` array | Track times |
 | `lons` | float array | degrees E | TC centre longitude |
 | `lats` | float array | degrees N | TC centre latitude (negative = SH) |
 | `vmax` | float array | m/s | Maximum surface wind speed |
@@ -103,27 +103,50 @@ Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 | `rmax` | float array | km | Radius of maximum wind |
 | `lons_grid` | 1-D float array | degrees E | Output grid |
 | `lats_grid` | 1-D float array | degrees N | Output grid |
-| `interp_interval` | str or None | — | e.g. `'20min'`, `'1h'`; `None` = no interpolation |
-| `wind_model` | str | — | `'cle15'` (default) or `'holland'` |
+| `interp_interval` | str or None | e.g. `'20min'`, `'1h'`; `None` = no interpolation |
+| `wind_model` | str | `'cle15'` (default) or `'holland'` |
+| `terrain` | `xr.Dataset` or None (default) | Output of `tcwf.terrain_features` for the same grid |
 
 #### `Output variables:` 
 
 `uwnd` (m/s), `vwnd` (m/s), `pres` (Pa).
 
 
-### `tcwf.fill_rmax_gaps(rmax_km, vmax_ms, lats)`
+### --> tcwf.terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1)
+
+With `terrain=...`, `compute_tc_fields` changes the wind over land
+
+- **Surface roughness**: rougher ground (forest, towns) slows the 10m wind more than smooth ground (grass, water). The roughness is taken from the land cover upwind (ESA WorldCover 2021).
+- **Land fetch**: the more land the wind has crossed within 50 km upwind, the lower the wind (ERA5 land-sea mask).
+- **Elevation** (Copernicus DEM, 90m): speed-up on slopes facing the wind and on crests, slow-down in valleys, channelling along valleys, shelter behind steep upwind slopes, lower winds in rugged terrain.
+- **Inflow**: the wind turns towards the centre, by 37° inland and 22° with water upwind.
+
+The coefficients were fitted on station winds (GHCNh) near tropical cyclones, 2000-2025.
+
+`terrain_features` reads the tiles around every grid point once. It is slow, so save the result and reuse it for every storm on that grid. It needs `rasterio` (`pip install tcwindfields[terrain]`) and the tiles in `terrain_dir/worldcover/` and `terrain_dir/cop_dem_90m/` (use `tcwf.download_terrain_tiles` to download them). It stops if a tile with land is missing (`tcwf.missing_tiles` lists them), since a missing tile would be read as sea.
+
+```python
+tcwf.download_terrain_tiles(lons_grid, lats_grid, 'terrain_dir')
+terr = tcwf.terrain_features(lons_grid, lats_grid, 'terrain_dir', n_procs=8)
+terr.to_netcdf('terrain_grid.nc')
+ds = tcwf.compute_tc_fields(time_tc, lons_tc, lats_tc, vmax_tc, pmin_tc, rmax_tc,
+                            lons_grid, lats_grid, terrain=terr)
+```
+
+
+### --> tcwf.fill_rmax_gaps(rmax_km, vmax_ms, lats)
 
 Fill `NaN` values in a `rmax` array using the Willoughby & Rahn (2004)
 empirical formula. Observed values are kept unchanged.
 
 
-### `tcwf.interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h')`
+### --> tcwf.interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h')
 
 Interpolate track arrays to a regular time step. Returns a dict with the
 same keys. Useful for pre-processing before calling `compute_tc_fields`.
 
 
-### `tcwf.input_units()`
+### --> tcwf.input_units()
 
 Print a summary of all required input units and default model parameters.
 
@@ -136,3 +159,7 @@ Print a summary of all required input units and default model parameters.
 - Emanuel, K. (2004). Tropical cyclone energetics and structure. *Atmospheric Turbulence and Mesoscale Meteorology*, 8, 165-191.
 - Holland, G. J. (1980). An analytic model of the wind and pressure profiles in hurricanes. *Monthly Weather Review*, 108(8), 1212-1218.
 - Willoughby, H. E., & Rahn, M. E. (2004). Parametric representation of the primary hurricane vortex. Part I: Observations and evaluation of the Holland (1980) model. *Monthly Weather Review*, 132(12), 3033-3048.
+- Jackson, P. S., & Hunt, J. C. R. (1975). Turbulent wind flow over a low hill. *Quarterly Journal of the Royal Meteorological Society*, 101(430), 929-955.
+- Troen, I., & Petersen, E. L. (1989). *European Wind Atlas*. Risø National Laboratory (WAsP).
+- FEMA (2021). *Hazus Hurricane Model Technical Manual* (sea-land roughness transition).
+- Zanaga, D., et al. (2022). ESA WorldCover 10 m 2021 v200. doi:10.5281/zenodo.7254221.
