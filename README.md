@@ -106,6 +106,7 @@ Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 | `interp_interval` | str or None | e.g. `'20min'`, `'1h'`; `None` = no interpolation |
 | `wind_model` | str | `'cle15'` (default) or `'holland'` |
 | `terrain` | `xr.Dataset` or None (default) | Output of `tcwf.terrain_features` for the same grid |
+| `land_correction` | bool | With `terrain`: also apply a statistical land correction (default `False`: physics only) |
 
 #### `Output variables:` 
 
@@ -134,6 +135,12 @@ ds = tcwf.compute_tc_fields(time_tc, lons_tc, lats_tc, vmax_tc, pmin_tc, rmax_tc
 ```
 
 
+## Statistical land correction (optional): 
+### --> compute_tc_fields(..., terrain=terr, land_correction=True)
+
+On top of the physics above, a factor on the wind over land learned from station observations: gradient-boosted decision trees (LightGBM, model in `assets/land_correction.txt`) trained on GHCNh station winds near TCs (2000-2025). Its 19 inputs come from the track (dist from the centre, bearing, Vmax, Rmax, forward speed, lat, time it's been over land, dist2land, wind) and the terrain (upwind roughness and water, dist2coast, elevation, ruggedness, shelter, the hill and roughness factors). It corrects storm-scale errors over land that the physics does not. The wind over open sea is unchanged. It needs `lightgbm`, and a terrain file from `terrain_features` 
+
+
 ### --> tcwf.fill_rmax_gaps(rmax_km, vmax_ms, lats)
 
 Fill `NaN` values in a `rmax` array using the Willoughby & Rahn (2004)
@@ -142,8 +149,7 @@ empirical formula. Observed values are kept unchanged.
 
 ### --> tcwf.interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h')
 
-Interpolate track arrays to a regular time step. Returns a dict with the
-same keys. Useful for pre-processing before calling `compute_tc_fields`.
+Interpolate track arrays to a regular time step. Returns a dict with the same keys. If `interp_interval` is not None, `compute_tc_fields` will use it.
 
 
 ### --> tcwf.input_units()

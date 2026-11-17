@@ -238,7 +238,7 @@ def _dem_cells(lat, lon, terrain_dir, edges_km=RING_EDGES_KM, n_sectors=8):
     for v in (mean.astype(np.float32), np.sqrt(np.maximum(var, 0)).astype(np.float32), amax.astype(np.float32)):
         v[empty | ~np.isfinite(v)] = np.nan
         out.append(v.reshape(n_sectors, n_r))
-    return (n.reshape(n_sectors, n_r), *out)
+    return (n.reshape(n_sectors, n_r), *out, float(z[i_pt, j_pt]))
 
 def _detrend_taper(z, alpha=0.25):
     """z minus its best-fit plane, tapered to 0 at the edges (Tukey window)."""
@@ -301,10 +301,13 @@ def _fetch_weights(edges_km):
     return w/w.sum()
 
 def _one_point(args):
-    """Upwind features of one point (sector-wise) and its land weight."""
+    """
+    Upwind features of one point (sector-wise), its land weight, DEM elevation, height above the mean within 1 km
+    (TPI) and whether the point itself is on land.
+    """
     lat, lon, terrain_dir = args
     frac, n = _landcover_cells(lat, lon, terrain_dir)
-    dn, mu, sd, amax = _dem_cells(lat, lon, terrain_dir)
+    dn, mu, sd, amax, z_dem = _dem_cells(lat, lon, terrain_dir)
     sa, sc = _point_speedup(lat, lon, terrain_dir)
     edges = np.asarray(RING_EDGES_KM)
     outer = edges[1:]
@@ -325,31 +328,52 @@ def _one_point(args):
     N = dnf.sum()
     m1 = (muf*dnf).sum()/max(N, 1)
     std5 = np.sqrt(max(((sdf**2 + muf**2)*dnf).sum()/max(N, 1) - m1**2, 0)) if N > 0 else np.nan
+    sel = outer <= 1.0 + 1e-9  # TPI within 1 km: point elevation minus the mean around it
+    N1 = dn[:, sel].sum()
+    tpi1 = -(np.nan_to_num(mu[:, sel])*dn[:, sel]).sum()/max(N1, 1) if N1 > 0 else np.nan
     sec = np.arange(8) % len(TOPO_AXES)
-    return ln_z0, water_up, land_weight, sx1, std5, sa[sec], sc[sec]
+    return ln_z0, water_up, land_weight, sx1, std5, sa[sec], sc[sec], z_dem, tpi1, land_point
 
-def _lsm_land_fraction(lat, lon, radius_km=LAND_FETCH_KM, step_km=5.0, n_sectors=8, rays=5):
-    """Mean land fraction (ERA5 land-sea mask) within radius_km upwind of each point: (point, sector)."""
+@lru_cache(maxsize=1)
+def _lsm():
+    """ERA5 land-sea mask (LSM_FILE): latitudes (ascending), longitudes, field."""
     m = xr.open_dataset(LSM_FILE)['lsm'].load()
-    la_g, lo_g = m['latitude'].values.astype(float), m['longitude'].values.astype(float)
-    field = m.values.astype(float)
+    return m['latitude'].values.astype(float), m['longitude'].values.astype(float), m.values.astype(float)
+
+def _lsm_bilinear(plat, plon):
+    """ERA5 land-sea mask (LSM_FILE) bilinearly interpolated at points."""
+    la_g, lo_g, field = _lsm()
+    fy = (np.asarray(plat, float) - la_g[0])/(la_g[1] - la_g[0])
+    j0 = np.clip(np.floor(fy).astype(int), 0, len(la_g) - 2)
+    wy = np.clip(fy - j0, 0.0, 1.0)
+    fx = ((np.asarray(plon, float) - lo_g[0]) % 360.0)/(lo_g[1] - lo_g[0])
+    i0 = np.floor(fx).astype(int) % len(lo_g)
+    i1, wx = (i0 + 1) % len(lo_g), fx - np.floor(fx)
+    return (1 - wy)*((1 - wx)*field[j0, i0] + wx*field[j0, i1]) + wy*((1 - wx)*field[j0 + 1, i0] + wx*field[j0 + 1, i1])
+
+def _lsm_coast_km(lat, lon, land_point, max_km=300.0, step_km=5.0):
+    """Distance (km) to the sea (land-sea mask < 0.5) along 8 directions, 0 on water points, max_km + step if none."""
+    dists = np.arange(step_km, max_km + 0.1*step_km, step_km)
+    prof = _lsm_profile(lat, lon, dists, rays=3).mean(axis=2)  # (point, sector, dist)
+    sea = prof < 0.5
+    first = np.where(sea.any(-1), dists[np.argmax(sea, axis=-1)], max_km + step_km)
+    return np.where(land_point, first.min(axis=1), 0.0)
+
+def _lsm_land_fraction(lat, lon, radius_km=LAND_FETCH_KM, step_km=5.0):
+    """Mean land fraction (ERA5 land-sea mask) within radius_km upwind of each point: (point, sector)."""
     dists = np.arange(step_km, radius_km + 0.1*step_km, step_km)
+    return _lsm_profile(lat, lon, dists).mean(axis=(2, 3))
+
+def _lsm_profile(lat, lon, dists, n_sectors=8, rays=5):
+    """Land-sea mask along `rays` bearings across each upwind sector, at distances dists (km): (point, sector, ray, dist)."""
     width = 360.0/n_sectors
     brg = np.arange(n_sectors)[:, None]*width + (np.arange(rays) + 0.5)/rays*width - width/2
     th = np.deg2rad(brg)[None, :, :, None]
-    dl = (dists/6371.0)[None, None, None, :]
-    p1, l1 = np.deg2rad(lat)[:, None, None, None], np.deg2rad(lon)[:, None, None, None]
+    dl = (np.asarray(dists, float)/6371.0)[None, None, None, :]
+    p1, l1 = np.deg2rad(np.asarray(lat, float))[:, None, None, None], np.deg2rad(np.asarray(lon, float))[:, None, None, None]
     p2 = np.arcsin(np.sin(p1)*np.cos(dl) + np.cos(p1)*np.sin(dl)*np.cos(th))
     l2 = l1 + np.arctan2(np.sin(th)*np.sin(dl)*np.cos(p1), np.cos(dl) - np.sin(p1)*np.sin(p2))
-    plat, plon = np.rad2deg(p2).ravel(), np.rad2deg(l2).ravel()
-    fy = (plat - la_g[0])/(la_g[1] - la_g[0])
-    j0 = np.clip(np.floor(fy).astype(int), 0, len(la_g) - 2)
-    wy = np.clip(fy - j0, 0.0, 1.0)
-    fx = ((plon - lo_g[0]) % 360.0)/(lo_g[1] - lo_g[0])
-    i0 = np.floor(fx).astype(int) % len(lo_g)
-    i1, wx = (i0 + 1) % len(lo_g), fx - np.floor(fx)
-    v = ((1 - wy)*((1 - wx)*field[j0, i0] + wx*field[j0, i1]) + wy*((1 - wx)*field[j0 + 1, i0] + wx*field[j0 + 1, i1]))
-    return v.reshape(p2.shape).mean(axis=(2, 3))
+    return _lsm_bilinear(np.rad2deg(p2).ravel(), np.rad2deg(l2).ravel()).reshape(p2.shape)
 
 def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
     """
@@ -385,7 +409,10 @@ def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
                      'std5': (g2, np.array([r[4] for r in res]).reshape(shp)),
                      's_along': (g3, np.stack([r[5] for r in res]).reshape(shp + (8,))),
                      's_across': (g3, np.stack([r[6] for r in res]).reshape(shp + (8,))),
-                     'land_up': (g3, _lsm_land_fraction(lat, lon).reshape(shp + (8,)))},
+                     'land_up': (g3, _lsm_land_fraction(lat, lon).reshape(shp + (8,))),
+                     'z_dem': (g2, np.array([r[7] for r in res]).reshape(shp)),
+                     'tpi1': (g2, np.array([r[8] for r in res]).reshape(shp)),
+                     'coast_km': (g2, _lsm_coast_km(lat, lon, np.array([r[9] for r in res])).reshape(shp))},
                     coords={'lat': lats_grid, 'lon': lons_grid, 'sector': np.arange(8)*45.0})
     attrs = {'ln_z0': 'ln of the upwind, distance-weighted roughness length (m)',
              'water_up': 'upwind, distance-weighted water fraction',
@@ -393,7 +420,9 @@ def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
              'sx1': 'steepest upwind slope angle within 1 km (deg; > 0 sheltered)',
              'std5': 'std of the elevation within 5 km (m; ruggedness)',
              's_along': 'potential-flow speed-up, along the wind', 's_across': 'potential-flow speed-up, across',
-             'land_up': f'land fraction within {LAND_FETCH_KM:g} km upwind (ERA5 land-sea mask)'}
+             'land_up': f'land fraction within {LAND_FETCH_KM:g} km upwind (ERA5 land-sea mask)',
+             'z_dem': 'DEM elevation at the point (m)', 'tpi1': 'elevation minus the mean within 1 km (m; > 0 hilltop)',
+             'coast_km': 'distance to the sea (km; ERA5 land-sea mask, 0 on water points)'}
     for k, v in attrs.items():
         ds[k].attrs['long_name'] = v
     ds['sector'].attrs = {'units': 'degree', 'long_name': 'upwind sector centre (wind FROM)'}
@@ -416,24 +445,36 @@ def _at_direction(x, wdir_from):
     x1 = np.take_along_axis(x, ((s0 + 1) % n)[..., None], -1)[..., 0]
     return (1 - a)*x0 + a*x1
 
-def land_effects(U, V, terrain, tc_lat):
+def land_factors(U, V, terrain, tc_lat):
     """
-    Wind (U, V: lat x lon, m/s) with the land effects: the direction turned inward (inflow) 
-    and the speed times roughness x land fetch x topography
+    Land effects at a time step (arrays shaped like U): wind direction turned inward (wdir, FROM), land weight (w),
+    multipliers (m_rough, m_fetch, m_topo), and the upwind z0 (m), water fraction and Sx for that direction.
     terrain: dict of the arrays of terrain_features (lat, lon[, sector]).
     """
-    spd = np.hypot(U, V)
     wdir = np.degrees(np.arctan2(-U, -V)) % 360  # meteorological, wind from direction
     w = terrain['land_weight']
     inflow = INFLOW_SEA + (INFLOW_LAND - INFLOW_SEA)*(1 - np.clip(_at_direction(terrain['water_up'], wdir), 0, 1))
     d = (wdir - w*inflow*np.sign(tc_lat)) % 360 # NH: turned anticlockwise (towards the centre)
-    m_rough = roughness_multiplier(np.exp(_at_direction(terrain['ln_z0'], d)))
-    m_fetch = np.exp(LAND_FETCH_GAMMA*np.nan_to_num(_at_direction(terrain['land_up'], d)))
+    z0_up = np.exp(_at_direction(terrain['ln_z0'], d))
+    sx1_up = _at_direction(terrain['sx1'], d)
     ln_topo = (TOPO_COEF['s_along']*np.nan_to_num(_at_direction(terrain['s_along'], d))
                + TOPO_COEF['s_across']*np.nan_to_num(_at_direction(terrain['s_across'], d))
-               + TOPO_COEF['sx_pos']*np.maximum(np.nan_to_num(_at_direction(terrain['sx1'], d)), 0)/10.0
+               + TOPO_COEF['sx_pos']*np.maximum(np.nan_to_num(sx1_up), 0)/10.0
                + TOPO_COEF['rug']*np.nan_to_num(terrain['std5'])/100.0)
-    m = m_rough*m_fetch*np.clip(np.exp(ln_topo), *TOPO_CAP)
-    spd = spd*(1 + w*(m - 1))
-    rad = np.radians(d)
+    return {'wdir': d, 'w': w, 'm_rough': roughness_multiplier(z0_up),
+            'm_fetch': np.exp(LAND_FETCH_GAMMA*np.nan_to_num(_at_direction(terrain['land_up'], d))),
+            'm_topo': np.clip(np.exp(ln_topo), *TOPO_CAP), 'z0_up': z0_up,
+            'water_up': _at_direction(terrain['water_up'], d), 'sx1_up': sx1_up}
+
+def land_effects(U, V, terrain, tc_lat, correction=None):
+    """
+    Wind (U, V: lat x lon, m/s) with the land effects: the direction turned inward (inflow)
+    and the speed times roughness x land fetch x topography (weighted by the land weight).
+    correction: optional function (speed, land_factors) --> speed, applied after (statistical land correction).
+    """
+    lf = land_factors(U, V, terrain, tc_lat)
+    spd = np.hypot(U, V)*(1 + lf['w']*(lf['m_rough']*lf['m_fetch']*lf['m_topo'] - 1))
+    if correction is not None:
+        spd = correction(spd, lf)
+    rad = np.radians(lf['wdir'])
     return -spd*np.sin(rad), -spd*np.cos(rad)

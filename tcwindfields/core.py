@@ -9,6 +9,7 @@ from ._utils import storm_motion, coriolis
 from ._fields import cle15_wind_profile, holland_wind_profile, wind_field_2d
 from ._holland import beta_model, calc_pressure_profile, pressure_field_2d
 from ._terrain import land_effects
+from ._correction import corrected_speed, track_land
 
 
 def interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h'):
@@ -66,6 +67,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
                        p_env_hpa=1013.0,
                        verbose=True,
                        terrain=None,
+                       land_correction=False,
                        **cle15_kwargs):
     """
     Compute 2-D tropical cyclone wind and pressure fields for a full track.
@@ -94,6 +96,8 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     terrain : xr.Dataset or None
         Output of tcwf.terrain_features for the same grid. If given, the wind over land is changed for the
         surface roughness, the land crossed upwind, hills and valleys, and turned towards the centre
+    land_correction : bool
+        With terrain: also apply the statistical land correction (trained on station winds; needs lightgbm).
     **cle15_kwargs
         Optional overrides for CLE15 model parameters (ignored when wind_model='holland'):
         Cdvary, C_d, w_cool, CkCdvary, CkCd, eye_adj, alpha_eye.
@@ -148,6 +152,12 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
         if not (np.allclose(terrain['lat'].values, lats_grid) and np.allclose(terrain['lon'].values, lons_grid)):
             raise ValueError("terrain must come from terrain_features() on the same lons_grid, lats_grid")
         terrain = {k: terrain[k].transpose('lat', 'lon', ...).values.astype(float) for k in terrain.data_vars}
+    if land_correction:  # statistical land correction
+        if terrain is None or not {'coast_km', 'z_dem', 'tpi1'} <= set(terrain):
+            raise ValueError("land_correction needs terrain from terrain_features()")
+        heading = (90.0 - dir_math) % 360  # bearing of the motion (deg from north)
+        d2l, t_over = track_land(lons, lats, times)
+        LO, LA = np.meshgrid(lons_grid, lats_grid)
 
     iterator = tqdm(range(nt)) if verbose else range(nt)
     for T in iterator:
@@ -161,7 +171,11 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
                               spd_ms[T], dir_math[T],
                               lons_grid, lats_grid)
         if terrain is not None:
-            U, V = land_effects(U, V, terrain, lats[T])
+            corr = None
+            if land_correction:
+                tc = {'vmax': vmax[T], 'rmax': rmax[T], 'speed': spd_ms[T], 'lat': lats[T], 'd2l': d2l[T], 't_overland': t_over[T]}
+                corr = lambda s, lf: corrected_speed(s, lf, terrain, LO, LA, lons[T], lats[T], heading[T], tc)
+            U, V = land_effects(U, V, terrain, lats[T], corr)
         uwnd_out[T] = U.astype(np.float32)
         vwnd_out[T] = V.astype(np.float32)
 
