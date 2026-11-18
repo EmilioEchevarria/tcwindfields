@@ -8,8 +8,9 @@ from tqdm import tqdm
 from ._utils import storm_motion, coriolis
 from ._fields import cle15_wind_profile, holland_wind_profile, wind_field_2d
 from ._holland import beta_model, calc_pressure_profile, pressure_field_2d
-from ._terrain import land_effects
+from ._terrain import land_effects, z0_sea
 from ._correction import corrected_speed, track_land
+from ._gusts import gust_factor
 
 
 def interpolate_track(times, lons, lats, vmax, pmin, rmax, interval='1h'):
@@ -68,6 +69,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
                        verbose=True,
                        terrain=None,
                        land_correction=False,
+                       gust_period=None,
                        **cle15_kwargs):
     """
     Compute 2-D tropical cyclone wind and pressure fields for a full track.
@@ -98,6 +100,12 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
         surface roughness, the land crossed upwind, hills and valleys, and turned towards the centre
     land_correction : bool
         With terrain: also apply the statistical land correction (trained on station winds; needs lightgbm).
+    gust_period : str or None
+        Also return the 3-s wind gust (WMO guideline for TCs, Harper et al. 2010): the highest gust expected
+        within this period, from the wind speed and the roughness upwind (sea roughness without terrain).
+            '10min' --> WMO standard, goes with the 10-min mean wind: gusts at each time
+            '1h'    --> 6% higher: use it for the storm peak gust at each point, gust.max('time')
+        Any duration from '1min' to '1h' works. None (default): no gusts.
     **cle15_kwargs
         Optional overrides for CLE15 model parameters (ignored when wind_model='holland'):
         Cdvary, C_d, w_cool, CkCdvary, CkCd, eye_adj, alpha_eye.
@@ -105,7 +113,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     Returns
     -------
     xr.Dataset
-        Variables: uwnd (m/s), vwnd (m/s), pres (Pa)
+        Variables: uwnd (m/s), vwnd (m/s), pres (Pa) [, gust (m/s) with gust_period]
         Dimensions: time, lat, lon
     """
     times = np.asarray(times, dtype='datetime64[ns]')
@@ -148,6 +156,12 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
     if wind_model not in ('cle15', 'holland'):
         raise ValueError(f"wind_model must be 'cle15' or 'holland', got '{wind_model}'")
 
+    if gust_period is not None:
+        gust_s = pd.Timedelta(gust_period).total_seconds()
+        if not 60 <= gust_s <= 3600:
+            raise ValueError(f"gust_period must be between '1min' and '1h', got '{gust_period}'")
+        gust_out = np.zeros((nt, nlat, nlon), dtype=np.float32)
+
     if terrain is not None:  # land effects, needs terrain features of the same grid
         if not (np.allclose(terrain['lat'].values, lats_grid) and np.allclose(terrain['lon'].values, lons_grid)):
             raise ValueError("terrain must come from terrain_features() on the same lons_grid, lats_grid")
@@ -170,14 +184,17 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
         U, V = wind_field_2d(rr_km, VV_ms, lons[T], lats[T],
                               spd_ms[T], dir_math[T],
                               lons_grid, lats_grid)
+        z0 = z0_sea  # roughness upwind: sea everywhere without terrain
         if terrain is not None:
             corr = None
             if land_correction:
                 tc = {'vmax': vmax[T], 'rmax': rmax[T], 'speed': spd_ms[T], 'lat': lats[T], 'd2l': d2l[T], 't_overland': t_over[T]}
                 corr = lambda s, lf: corrected_speed(s, lf, terrain, LO, LA, lons[T], lats[T], heading[T], tc)
-            U, V = land_effects(U, V, terrain, lats[T], corr)
+            U, V, z0 = land_effects(U, V, terrain, lats[T], corr)
         uwnd_out[T] = U.astype(np.float32)
         vwnd_out[T] = V.astype(np.float32)
+        if gust_period is not None:
+            gust_out[T] = (gust_factor(z0, gust_s)*np.hypot(U, V)).astype(np.float32)
 
         # Holland pressure profile (same for both wind models)
         rr_p, Pr_p = calc_pressure_profile(lats[T], pmin[T], vmax[T],
@@ -201,4 +218,7 @@ def compute_tc_fields(times, lons, lats, vmax, pmin, rmax,
             'lon': lons_grid,
         },
     )
+    if gust_period is not None:
+        ds['gust'] = (['time', 'lat', 'lon'], gust_out,
+                      {'units': 'm s-1', 'long_name': f'highest 3-s wind gust within {gust_period}'})
     return ds

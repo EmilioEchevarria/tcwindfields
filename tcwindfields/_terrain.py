@@ -20,31 +20,31 @@ import numpy as np
 import xarray as xr
 from tqdm import tqdm
 
-# ESA WorldCover 2021 v200 classes and roughness lengths z0 (m), fitted on station winds (water = Z0_SEA)
-WC_CODES = (10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100)
-WC_NAMES = ('tree', 'shrub', 'grass', 'crop', 'built', 'bare', 'snow', 'water', 'wetland', 'mangrove', 'moss')
-Z0_CLASS = {'tree': 1.1704, 'shrub': 0.4283, 'grass': 0.1343, 'crop': 0.3362, 'built': 0.5153, 'bare': 0.0128,
+# ESA WorldCover 2021 v200 classes and roughness lengths z0 (m), fitted on station winds (water = z0_sea)
+wc_codes = (10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100)
+wc_names = ('tree', 'shrub', 'grass', 'crop', 'built', 'bare', 'snow', 'water', 'wetland', 'mangrove', 'moss')
+z0_class = {'tree': 1.1704, 'shrub': 0.4283, 'grass': 0.1343, 'crop': 0.3362, 'built': 0.5153, 'bare': 0.0128,
             'snow': 0.001, 'water': None, 'wetland': 2.5149, 'mangrove': 0.565, 'moss': 0.01}
-Z0_SEA = 0.0013  # m, marine roughness (HAZUS)
-H_BL = 600.0  # m, height where the wind is unchanged from sea to land
-RING_EDGES_KM = (0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0)
-FETCH_X0_M, FETCH_XMAX_KM = 10.0, 20.0  # distance weights ln(x/x0)/ln(xmax/x0) (~60% within 1 km)
-LAND_FETCH_KM, LAND_FETCH_GAMMA = 50.0, -0.238  # wind x exp(gamma x land fraction within 50 km upwind)
-TOPO_COEF = {'s_along': 2.3949, 's_across': 1.4201, 'sx_pos': -0.02122, 'rug': -0.05447}
-TOPO_CAP = (0.5, 1.71)  # limits of the topographic factor (upper": flow separation, AS/NZS 1170.2)
-TOPO_Z_EFF, TOPO_R_AVG, TOPO_HALF_KM = 400.0, 500.0, 10.0    # m, m, km
-INFLOW_SEA, INFLOW_LAND = 22.0, 37.0  # deg, inflow angle with water upwind / inland
-TOPO_AXES = (0.0, 45.0, 90.0, 135.0)  # wind axes
-KM_PER_DEG = 111.2
+z0_sea = 0.0013  # m, marine roughness (HAZUS)
+h_bl = 600.0  # m, height where the wind is unchanged from sea to land
+ring_edges_km = (0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0)
+fetch_x0_m, fetch_xmax_km = 10.0, 20.0  # distance weights ln(x/x0)/ln(xmax/x0) (~60% within 1 km)
+land_fetch_km, land_fetch_gamma = 50.0, -0.238  # wind x exp(gamma x land fraction within 50 km upwind)
+topo_coef = {'s_along': 2.3949, 's_across': 1.4201, 'sx_pos': -0.02122, 'rug': -0.05447}
+topo_cap = (0.5, 1.71)  # limits of the topographic factor (upper": flow separation, AS/NZS 1170.2)
+topo_z_eff, topo_r_avg, topo_half_km = 400.0, 500.0, 10.0    # m, m, km
+inflow_sea, inflow_land = 22.0, 37.0  # deg, inflow angle with water upwind / inland
+topo_axes = (0.0, 45.0, 90.0, 135.0)  # wind axes
+km_per_deg = 111.2
 
-_WC_URL = 'https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_{tile}_Map.tif'
-_DEM_URL = 'https://copernicus-dem-90m.s3.amazonaws.com/{name}/{name}.tif'
-LSM_FILE = pathlib.Path(__file__).resolve().parent.parent/'assets'/'era5_land_sea_mask.nc'
-_NO_TILE = 'no_tile.txt'  # tiles that do not exist on the server (ocean), written by download_terrain_tiles
+_wc_url = 'https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_{tile}_Map.tif'
+_dem_url = 'https://copernicus-dem-90m.s3.amazonaws.com/{name}/{name}.tif'
+lsm_file = pathlib.Path(__file__).resolve().parent.parent/'assets'/'era5_land_sea_mask.nc'
+_no_tile = 'no_tile.txt'  # tiles that do not exist on the server (ocean), written by download_terrain_tiles
 
-_LUT = np.full(256, WC_NAMES.index('water'), dtype=np.int64)  # no data / unknown codes = water (ocean)
-for _k, _c in enumerate(WC_CODES):
-    _LUT[_c] = _k
+_lut = np.full(256, wc_names.index('water'), dtype=np.int64)  # no data / unknown codes = water (ocean)
+for _k, _c in enumerate(wc_codes):
+    _lut[_c] = _k
 
 
 # Tiles
@@ -65,9 +65,9 @@ def _dem_file(terrain_dir, lat0, lon0):
 
 def _grid_box(lons_grid, lats_grid, buffer_km=12.0):
     """Lat/lon box of the grid plus the 10-km terrain boxes around its points."""
-    dlat = buffer_km/KM_PER_DEG
+    dlat = buffer_km/km_per_deg
     la0, la1 = np.min(lats_grid) - dlat, np.max(lats_grid) + dlat
-    dlon = buffer_km/(KM_PER_DEG*np.cos(np.radians(min(max(abs(la0), abs(la1)), 85.0))))
+    dlon = buffer_km/(km_per_deg*np.cos(np.radians(min(max(abs(la0), abs(la1)), 85.0))))
     return la0, la1, np.min(lons_grid) - dlon, np.max(lons_grid) + dlon
 
 def _tiles(lons_grid, lats_grid):
@@ -77,12 +77,12 @@ def _tiles(lons_grid, lats_grid):
     for a in range(int(np.floor(la0/3)*3), int(np.floor(la1/3)*3) + 1, 3):
         for b in range(int(np.floor(lo0/3)*3), int(np.floor(lo1/3)*3) + 1, 3):
             bw = (b + 180) % 360 - 180
-            u = _WC_URL.format(tile=worldcover_tile(a, bw))
+            u = _wc_url.format(tile=worldcover_tile(a, bw))
             out.append(('worldcover', u.rsplit('/', 1)[1], u, a, bw, 3))
     for a in range(int(np.floor(la0)), int(np.floor(la1)) + 1):
         for b in range(int(np.floor(lo0)), int(np.floor(lo1)) + 1):
             bw = (b + 180) % 360 - 180
-            u = _DEM_URL.format(name=cop_dem_tile(a, bw))
+            u = _dem_url.format(name=cop_dem_tile(a, bw))
             out.append(('cop_dem_90m', u.rsplit('/', 1)[1], u, a, bw, 1))
     return out
 
@@ -98,14 +98,14 @@ def missing_tiles(lons_grid, lats_grid, terrain_dir):
     Tiles the grid needs that are not in terrain_dir although the ERA5 land-sea mask has land in them
     """
     la0, la1, lo0, lo1 = _grid_box(lons_grid, lats_grid)
-    m = xr.open_dataset(LSM_FILE)['lsm']
+    m = xr.open_dataset(lsm_file)['lsm']
     lsm, la_g, lo_g = m.values, m['latitude'].values, m['longitude'].values
     out = []
     for sub, name, _, a, b, size in _tiles(lons_grid, lats_grid):
         d = pathlib.Path(terrain_dir)/sub
         if (d/name).exists():
             continue
-        f_no = d/_NO_TILE
+        f_no = d/_no_tile
         if f_no.exists() and name in f_no.read_text().split():
             continue
         ya = (la_g >= max(a, la0)) & (la_g <= min(a + size, la1))
@@ -131,7 +131,7 @@ def download_terrain_tiles(lons_grid, lats_grid, terrain_dir):
         except urllib.error.HTTPError as e:  # 404: ocean tile, does not exist
             if e.code != 404:
                 raise
-            with open(d/_NO_TILE, 'a') as fo:
+            with open(d/_no_tile, 'a') as fo:
                 fo.write(name + '\n')
 
 @lru_cache(maxsize=64)
@@ -146,8 +146,8 @@ def read_box(lat, lon, half_km, tile_file, step, fill, res_default):
     Returns values (ny, nx), lat centres (north to south), lon centres.
     """
     from rasterio.windows import Window
-    dlat = half_km/KM_PER_DEG
-    dlon = half_km/(KM_PER_DEG*np.cos(np.radians(min(abs(lat), 85.0))))
+    dlat = half_km/km_per_deg
+    dlon = half_km/(km_per_deg*np.cos(np.radians(min(abs(lat), 85.0))))
     f0 = tile_file(int(np.floor(lat/step)*step), int(np.floor(lon/step)*step))
     res_x, res_y = _open(str(f0)).res if f0.exists() else (res_default, res_default)
     j0, j1 = int(np.floor((lon - dlon)/res_x)), int(np.ceil((lon + dlon)/res_x))
@@ -193,8 +193,8 @@ def read_box(lat, lon, half_km, tile_file, step, fill, res_default):
 # Terrain at one point
 def _polar_index(lat_c, lon_c, lat, lon, edges_km, n_sectors):
     """Sector and ring of each pixel (ring = -1 outside the last ring) and distance (km)."""
-    dy = ((lat_c - lat)*KM_PER_DEG).astype(np.float32)
-    dx = ((lon_c - lon)*KM_PER_DEG*np.cos(np.radians(lat))).astype(np.float32)
+    dy = ((lat_c - lat)*km_per_deg).astype(np.float32)
+    dx = ((lon_c - lon)*km_per_deg*np.cos(np.radians(lat))).astype(np.float32)
     dist = np.hypot(dy[:, None], dx[None, :])
     bear = np.degrees(np.arctan2(dx[None, :], dy[:, None])) % 360
     width = 360/n_sectors
@@ -203,18 +203,18 @@ def _polar_index(lat_c, lon_c, lat, lon, edges_km, n_sectors):
     ring[dist >= edges_km[-1]] = -1
     return sector, ring, dist
 
-def _landcover_cells(lat, lon, terrain_dir, edges_km=RING_EDGES_KM, n_sectors=8):
+def _landcover_cells(lat, lon, terrain_dir, edges_km=ring_edges_km, n_sectors=8):
     """WorldCover class fractions (sector, ring, class) and pixel counts (sector, ring)."""
     vals, lat_c, lon_c = read_box(lat, lon, edges_km[-1], partial(_wc_file, terrain_dir), step=3, fill=80, res_default=1/12000)
     sector, ring, _ = _polar_index(lat_c, lon_c, lat, lon, edges_km, n_sectors)
     ok = ring >= 0
-    n_r, n_c = len(edges_km) - 1, len(WC_CODES)
-    idx = (sector[ok]*n_r + ring[ok])*n_c + _LUT[vals[ok]]
+    n_r, n_c = len(edges_km) - 1, len(wc_codes)
+    idx = (sector[ok]*n_r + ring[ok])*n_c + _lut[vals[ok]]
     counts = np.bincount(idx, minlength=n_sectors*n_r*n_c).reshape(n_sectors, n_r, n_c)
     n = counts.sum(axis=2)
     return counts/np.maximum(n, 1)[..., None], n
 
-def _dem_cells(lat, lon, terrain_dir, edges_km=RING_EDGES_KM, n_sectors=8):
+def _dem_cells(lat, lon, terrain_dir, edges_km=ring_edges_km, n_sectors=8):
     """By (sector, ring), elevation relative to the point: pixel count, mean, std and max slope angle (deg)."""
     z, lat_c, lon_c = read_box(lat, lon, edges_km[-1], partial(_dem_file, terrain_dir), step=1, fill=0.0, res_default=1/1200)
     z = z.astype(np.float64)
@@ -257,7 +257,7 @@ def _detrend_taper(z, alpha=0.25):
         return w
     return r*np.outer(tukey(ny), tukey(nx))
 
-def speedup_fields(z, dx_m, dy_m, axes_deg=TOPO_AXES, z_eff=TOPO_Z_EFF):
+def speedup_fields(z, dx_m, dy_m, axes_deg=topo_axes, z_eff=topo_z_eff):
     """
     Surface speed-up of potential flow over the terrain, for winds along each axis (bearing): 
     s_along = F^-1[(k.n)^2/|k| h^ exp(-|k| z_eff)] (+ hills, - valleys), s_across with the
@@ -281,8 +281,8 @@ def speedup_fields(z, dx_m, dy_m, axes_deg=TOPO_AXES, z_eff=TOPO_Z_EFF):
     return sa, sc
 
 def _point_speedup(lat, lon, terrain_dir):
-    """s_along, s_across (n_axes) averaged within TOPO_R_AVG of the point."""
-    z, lat_c, lon_c = read_box(lat, lon, TOPO_HALF_KM, partial(_dem_file, terrain_dir), step=1, fill=0.0, res_default=1/1200)
+    """s_along, s_across (n_axes) averaged within topo_r_avg of the point."""
+    z, lat_c, lon_c = read_box(lat, lon, topo_half_km, partial(_dem_file, terrain_dir), step=1, fill=0.0, res_default=1/1200)
     z = np.where(np.isfinite(z), z, 0.0).astype(float)[::-1]
     lat_c = lat_c[::-1]
     dy = abs(lat_c[1] - lat_c[0])*111.195*1000
@@ -290,13 +290,13 @@ def _point_speedup(lat, lon, terrain_dir):
     i, j = int(np.argmin(np.abs(lat_c - lat))), int(np.argmin(np.abs(((lon_c - lon) + 180) % 360 - 180)))
     sa, sc = speedup_fields(z, dx, dy)
     yy, xx = np.mgrid[0:z.shape[0], 0:z.shape[1]]
-    m = np.hypot((yy - i)*dy, (xx - j)*dx) <= max(TOPO_R_AVG, 0.6*max(dx, dy))
+    m = np.hypot((yy - i)*dy, (xx - j)*dx) <= max(topo_r_avg, 0.6*max(dx, dy))
     return sa[:, m].mean(-1), sc[:, m].mean(-1)
 
 def _fetch_weights(edges_km):
     """Weight of each distance ring in the upwind average (transition ln(x/x0)/ln(xmax/x0), as HAZUS)."""
     e = np.asarray(edges_km, dtype=float)*1000
-    F = np.clip(np.log(np.maximum(e, FETCH_X0_M)/FETCH_X0_M)/np.log(FETCH_XMAX_KM*1000/FETCH_X0_M), 0, 1)
+    F = np.clip(np.log(np.maximum(e, fetch_x0_m)/fetch_x0_m)/np.log(fetch_xmax_km*1000/fetch_x0_m), 0, 1)
     w = np.diff(F)
     return w/w.sum()
 
@@ -309,11 +309,11 @@ def _one_point(args):
     frac, n = _landcover_cells(lat, lon, terrain_dir)
     dn, mu, sd, amax, z_dem = _dem_cells(lat, lon, terrain_dir)
     sa, sc = _point_speedup(lat, lon, terrain_dir)
-    edges = np.asarray(RING_EDGES_KM)
+    edges = np.asarray(ring_edges_km)
     outer = edges[1:]
     w = _fetch_weights(edges)
-    iw = WC_NAMES.index('water')
-    ln_z0c = np.log([Z0_SEA if Z0_CLASS[k] is None else Z0_CLASS[k] for k in WC_NAMES])
+    iw = wc_names.index('water')
+    ln_z0c = np.log([z0_sea if z0_class[k] is None else z0_class[k] for k in wc_names])
     ln_z0 = ((frac*ln_z0c).sum(-1)*w).sum(-1)  # (sector)
     water_up = (frac[..., iw]*w).sum(-1)
     land_point = frac[:, 0, iw].mean() < 0.5
@@ -331,17 +331,17 @@ def _one_point(args):
     sel = outer <= 1.0 + 1e-9  # TPI within 1 km: point elevation minus the mean around it
     N1 = dn[:, sel].sum()
     tpi1 = -(np.nan_to_num(mu[:, sel])*dn[:, sel]).sum()/max(N1, 1) if N1 > 0 else np.nan
-    sec = np.arange(8) % len(TOPO_AXES)
+    sec = np.arange(8) % len(topo_axes)
     return ln_z0, water_up, land_weight, sx1, std5, sa[sec], sc[sec], z_dem, tpi1, land_point
 
 @lru_cache(maxsize=1)
 def _lsm():
-    """ERA5 land-sea mask (LSM_FILE): latitudes (ascending), longitudes, field."""
-    m = xr.open_dataset(LSM_FILE)['lsm'].load()
+    """ERA5 land-sea mask (lsm_file): latitudes (ascending), longitudes, field."""
+    m = xr.open_dataset(lsm_file)['lsm'].load()
     return m['latitude'].values.astype(float), m['longitude'].values.astype(float), m.values.astype(float)
 
 def _lsm_bilinear(plat, plon):
-    """ERA5 land-sea mask (LSM_FILE) bilinearly interpolated at points."""
+    """ERA5 land-sea mask (lsm_file) bilinearly interpolated at points."""
     la_g, lo_g, field = _lsm()
     fy = (np.asarray(plat, float) - la_g[0])/(la_g[1] - la_g[0])
     j0 = np.clip(np.floor(fy).astype(int), 0, len(la_g) - 2)
@@ -359,7 +359,7 @@ def _lsm_coast_km(lat, lon, land_point, max_km=300.0, step_km=5.0):
     first = np.where(sea.any(-1), dists[np.argmax(sea, axis=-1)], max_km + step_km)
     return np.where(land_point, first.min(axis=1), 0.0)
 
-def _lsm_land_fraction(lat, lon, radius_km=LAND_FETCH_KM, step_km=5.0):
+def _lsm_land_fraction(lat, lon, radius_km=land_fetch_km, step_km=5.0):
     """Mean land fraction (ERA5 land-sea mask) within radius_km upwind of each point: (point, sector)."""
     dists = np.arange(step_km, radius_km + 0.1*step_km, step_km)
     return _lsm_profile(lat, lon, dists).mean(axis=(2, 3))
@@ -420,7 +420,7 @@ def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
              'sx1': 'steepest upwind slope angle within 1 km (deg; > 0 sheltered)',
              'std5': 'std of the elevation within 5 km (m; ruggedness)',
              's_along': 'potential-flow speed-up, along the wind', 's_across': 'potential-flow speed-up, across',
-             'land_up': f'land fraction within {LAND_FETCH_KM:g} km upwind (ERA5 land-sea mask)',
+             'land_up': f'land fraction within {land_fetch_km:g} km upwind (ERA5 land-sea mask)',
              'z_dem': 'DEM elevation at the point (m)', 'tpi1': 'elevation minus the mean within 1 km (m; > 0 hilltop)',
              'coast_km': 'distance to the sea (km; ERA5 land-sea mask, 0 on water points)'}
     for k, v in attrs.items():
@@ -430,7 +430,7 @@ def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
 
 
 # Applying the land effects at a time step
-def roughness_multiplier(z0_land, z0_sea=Z0_SEA, h=H_BL, z=10.0):
+def roughness_multiplier(z0_land, z0_sea=z0_sea, h=h_bl, z=10.0):
     """Wind at z over roughness z0_land relative to the marine wind (z0_sea), wind at h unchanged (log law)."""
     z0_land = np.asarray(z0_land, dtype=float)
     return (np.log(z/z0_land)/np.log(h/z0_land))*(np.log(h/z0_sea)/np.log(z/z0_sea))
@@ -453,17 +453,17 @@ def land_factors(U, V, terrain, tc_lat):
     """
     wdir = np.degrees(np.arctan2(-U, -V)) % 360  # meteorological, wind from direction
     w = terrain['land_weight']
-    inflow = INFLOW_SEA + (INFLOW_LAND - INFLOW_SEA)*(1 - np.clip(_at_direction(terrain['water_up'], wdir), 0, 1))
+    inflow = inflow_sea + (inflow_land - inflow_sea)*(1 - np.clip(_at_direction(terrain['water_up'], wdir), 0, 1))
     d = (wdir - w*inflow*np.sign(tc_lat)) % 360 # NH: turned anticlockwise (towards the centre)
     z0_up = np.exp(_at_direction(terrain['ln_z0'], d))
     sx1_up = _at_direction(terrain['sx1'], d)
-    ln_topo = (TOPO_COEF['s_along']*np.nan_to_num(_at_direction(terrain['s_along'], d))
-               + TOPO_COEF['s_across']*np.nan_to_num(_at_direction(terrain['s_across'], d))
-               + TOPO_COEF['sx_pos']*np.maximum(np.nan_to_num(sx1_up), 0)/10.0
-               + TOPO_COEF['rug']*np.nan_to_num(terrain['std5'])/100.0)
+    ln_topo = (topo_coef['s_along']*np.nan_to_num(_at_direction(terrain['s_along'], d))
+               + topo_coef['s_across']*np.nan_to_num(_at_direction(terrain['s_across'], d))
+               + topo_coef['sx_pos']*np.maximum(np.nan_to_num(sx1_up), 0)/10.0
+               + topo_coef['rug']*np.nan_to_num(terrain['std5'])/100.0)
     return {'wdir': d, 'w': w, 'm_rough': roughness_multiplier(z0_up),
-            'm_fetch': np.exp(LAND_FETCH_GAMMA*np.nan_to_num(_at_direction(terrain['land_up'], d))),
-            'm_topo': np.clip(np.exp(ln_topo), *TOPO_CAP), 'z0_up': z0_up,
+            'm_fetch': np.exp(land_fetch_gamma*np.nan_to_num(_at_direction(terrain['land_up'], d))),
+            'm_topo': np.clip(np.exp(ln_topo), *topo_cap), 'z0_up': z0_up,
             'water_up': _at_direction(terrain['water_up'], d), 'sx1_up': sx1_up}
 
 def land_effects(U, V, terrain, tc_lat, correction=None):
@@ -471,10 +471,11 @@ def land_effects(U, V, terrain, tc_lat, correction=None):
     Wind (U, V: lat x lon, m/s) with the land effects: the direction turned inward (inflow)
     and the speed times roughness x land fetch x topography (weighted by the land weight).
     correction: optional function (speed, land_factors) --> speed, applied after (statistical land correction).
+    Returns U, V and the upwind roughness length z0 (m, for the wnd gust).
     """
     lf = land_factors(U, V, terrain, tc_lat)
     spd = np.hypot(U, V)*(1 + lf['w']*(lf['m_rough']*lf['m_fetch']*lf['m_topo'] - 1))
     if correction is not None:
         spd = correction(spd, lf)
     rad = np.radians(lf['wdir'])
-    return -spd*np.sin(rad), -spd*np.cos(rad)
+    return -spd*np.sin(rad), -spd*np.cos(rad), lf['z0_up']

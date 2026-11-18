@@ -106,11 +106,12 @@ Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 | `interp_interval` | str or None | e.g. `'20min'`, `'1h'`; `None` = no interpolation |
 | `wind_model` | str | `'cle15'` (default) or `'holland'` |
 | `terrain` | `xr.Dataset` or None (default) | Output of `tcwf.terrain_features` for the same grid |
-| `land_correction` | bool | With `terrain`: also apply a statistical land correction (default `False`: physics only) |
+| `land_correction` | bool | With `terrain`: Also apply a statistical land correction (default `False`: physics only) |
+| `gust_period` | str or None (default) | Also return the 3s gust, highest within this period: `'10min'` or `'1h'` |
 
 #### `Output variables:` 
 
-`uwnd` (m/s), `vwnd` (m/s), `pres` (Pa).
+`uwnd` [m/s], `vwnd` [m/s], `pres` [Pa], and `gust` [m/s] (if `gust_period` is set).
 
 
 ### --> tcwf.terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1)
@@ -136,10 +137,18 @@ ds = tcwf.compute_tc_fields(time_tc, lons_tc, lats_tc, vmax_tc, pmin_tc, rmax_tc
 
 
 ## Statistical land correction (optional): 
-### --> compute_tc_fields(..., terrain=terr, land_correction=True)
+### --> tcwf.compute_tc_fields(..., terrain=terr, land_correction=True)
 
 On top of the physics above, a factor on the wind over land learned from station observations: gradient-boosted decision trees (LightGBM, model in `assets/land_correction.txt`) trained on GHCNh station winds near TCs (2000-2025). Its 19 inputs come from the track (dist from the centre, bearing, Vmax, Rmax, forward speed, lat, time it's been over land, dist2land, wind) and the terrain (upwind roughness and water, dist2coast, elevation, ruggedness, shelter, the hill and roughness factors). It corrects storm-scale errors over land that the physics does not. The wind over open sea is unchanged. It needs `lightgbm`, and a terrain file from `terrain_features` 
 
+
+## Wind gusts (optional):
+### --> tcwf.compute_tc_fields(..., gust_period='10min')
+
+`gust` = gust_factor x wnd_spd, with the gust factor of the WMO guideline (Harper et al. 2010), depends on z0. It is the maximum gust over a time period of either `'10min'` or `'1h'`.
+
+
+## Other functions:
 
 ### --> tcwf.fill_rmax_gaps(rmax_km, vmax_ms, lats)
 
@@ -169,3 +178,4 @@ Print a summary of all required input units and default model parameters.
 - Troen, I., & Petersen, E. L. (1989). *European Wind Atlas*. Risø National Laboratory (WAsP).
 - FEMA (2021). *Hazus Hurricane Model Technical Manual* (sea-land roughness transition).
 - Zanaga, D., et al. (2022). ESA WorldCover 10 m 2021 v200. doi:10.5281/zenodo.7254221.
+- Harper, B. A., Kepert, J. D., & Ginger, J. D. (2010). *Guidelines for converting between various wind averaging periods in tropical cyclone conditions*. WMO/TD-No. 1555, World Meteorological Organization.

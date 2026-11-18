@@ -19,11 +19,14 @@ Output grid (1-D arrays):
 Optional keyword:
   interp_interval : str  pandas duration string, e.g. '20min', '1h', '30min'
                          Set to None to use track data without interpolation.
+  gust_period     : str  also return the 3-s gust, highest within this period:
+                         '10min' (gusts at each time) or '1h' (storm peak gust, gust.max('time'))
 
 Outputs (xr.Dataset):
   uwnd  : m/s   zonal wind        (time, lat, lon)
   vwnd  : m/s   meridional wind   (time, lat, lon)
   pres  : Pa    surface pressure  (time, lat, lon)
+  gust  : m/s   3-s wind gust     (time, lat, lon), with gust_period
 
 CLE15 model default parameters (can be overridden via **kwargs):
   Cdvary   = 0       (0 = fixed C_d; 1 = Donelan et al. 2004 variable)

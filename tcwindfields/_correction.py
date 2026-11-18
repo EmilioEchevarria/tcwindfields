@@ -3,9 +3,9 @@ Statistical land correction (optional: compute_tc_fields(..., terrain=..., land_
 
 A factor f on the wind over land, predicted by gradient-boosted decision trees (LightGBM) from 19 inputs computed
 from the track and the terrain at each point. Trained on station winds near TCs (GHCNh 2000-2025). 
-Applied with the land weight, so the wind over open sea is unchanged:
-    wind = physics x (1 + w (f - 1)) x (1 + w (PEAK_FACTOR - 1))
-PEAK_FACTOR is an empirical factor that adjusts the storm maximum at each point.
+Applied with the land weight w (1 on land, land fraction within 10km over water, 0 at sea), so the wind over open sea is unchanged:
+    wind = physics x (1 + w**W_POWER (f - 1))
+
 """
 import pathlib
 
@@ -16,7 +16,7 @@ from ._utils import haversine_vectorized
 from ._terrain import _lsm_bilinear
 
 MODEL_FILE = pathlib.Path(__file__).resolve().parent.parent/'assets'/'land_correction.txt'
-PEAK_FACTOR = 1.181  # median observed / corrected storm maximum at land stations (set by the fit)
+W_POWER = 0.3  # weight of the correction: w**W_POWER (more correction near the coast; 0 over open sea)
 F_LIMITS = (0.2, 3.0)
 INPUTS = ['r_rmax', 'r_km', 'azi_strong', 'tc_vmax', 'tc_speed', 'abs_lat', 't_overland_h', 'tc_d2l', 'rmax',
           'ln_wind', 'z0_up', 'water_up', 'coast_km', 'z_dem', 'std5', 'tpi1', 'sx1_up', 'm_topo', 'm_terrain']
@@ -81,7 +81,7 @@ def factor(X):
 
 def corrected_speed(spd, lf, terrain, lons2d, lats2d, lon_c, lat_c, heading_deg, tc):
     """
-    Physics wind speed spd (lat, lon) times the land correction and the peak factor at one time step (land weight;
+    Physics wind speed spd (lat, lon) times the land correction at one time step (weight w**W_POWER;
     points with no land weight or wind <= 0.5 m/s unchanged). tc: track values at this step (vmax, rmax, speed, lat,
     d2l, t_overland).
     """
@@ -91,7 +91,7 @@ def corrected_speed(spd, lf, terrain, lons2d, lats2d, lon_c, lat_c, heading_deg,
     r_km, azi = storm_geometry(lon_c, lat_c, heading_deg, lons2d[sel], lats2d[sel])
     X = inputs(r_km, azi, tc, {k: v[sel] for k, v in lf.items()}, spd[sel],
                {k: terrain[k][sel] for k in ('coast_km', 'z_dem', 'std5', 'tpi1')})
-    w = lf['w'][sel]
+    w = lf['w'][sel]**W_POWER
     out = spd.copy()
-    out[sel] = spd[sel]*(1 + w*(factor(X) - 1))*(1 + w*(PEAK_FACTOR - 1))
+    out[sel] = spd[sel]*(1 + w*(factor(X) - 1))
     return out
