@@ -2,10 +2,10 @@
 Statistical land correction (optional: compute_tc_fields(..., terrain=..., land_correction=True)).
 
 A factor f on the wind over land, predicted by gradient-boosted decision trees (LightGBM) from 19 inputs computed
-from the track and the terrain at each point. Trained on station winds near TCs (GHCNh 2000-2025). 
-Applied with the land weight w (1 on land, land fraction within 10km over water, 0 at sea), so the wind over open sea is unchanged:
-    wind = physics x (1 + w**W_POWER (f - 1))
-
+from the track and the terrain at each point. Trained on station winds near TCs (GHCNh 2000-2025).
+Applied with a weight w, 1 on land and the land upwind over water (see correction_weight), so the wind over open sea
+and with onshore wind over water is unchanged:
+    wind = physics x (1 + w**w_power (f - 1))
 """
 import pathlib
 
@@ -15,18 +15,18 @@ import pandas as pd
 from ._utils import haversine_vectorized
 from ._terrain import _lsm_bilinear
 
-MODEL_FILE = pathlib.Path(__file__).resolve().parent.parent/'assets'/'land_correction.txt'
-W_POWER = 0.3  # weight of the correction: w**W_POWER (more correction near the coast; 0 over open sea)
-F_LIMITS = (0.2, 3.0)
-INPUTS = ['r_rmax', 'r_km', 'azi_strong', 'tc_vmax', 'tc_speed', 'abs_lat', 't_overland_h', 'tc_d2l', 'rmax',
+model_file = pathlib.Path(__file__).resolve().parent.parent/'assets'/'land_correction.txt'
+w_power = 1.0  # weight over water: (land upwind)**w_power; the model is fitted with it (E52)
+f_limits = (0.2, 3.0)
+input_names = ['r_rmax', 'r_km', 'azi_strong', 'tc_vmax', 'tc_speed', 'abs_lat', 't_overland_h', 'tc_d2l', 'rmax',
           'ln_wind', 'z0_up', 'water_up', 'coast_km', 'z_dem', 'std5', 'tpi1', 'sx1_up', 'm_topo', 'm_terrain']
+
+
 _BOOSTER = []
-
-
 def _booster():
     if not _BOOSTER:
         import lightgbm as lgb
-        _BOOSTER.append(lgb.Booster(model_file=str(MODEL_FILE)))
+        _BOOSTER.append(lgb.Booster(model_file=str(model_file)))
     return _BOOSTER[0]
 
 def bearing_met(lat0, lon0, lat1, lon1):
@@ -76,22 +76,30 @@ def inputs(r_km, azi_strong, tc, lf, wind, ter):
                          'm_terrain': b(lf['m_rough'])*b(lf['m_fetch'])})
 
 def factor(X):
-    """Correction factor f (observed / physics) at the rows of X (inputs()), limited to F_LIMITS."""
-    return np.clip(_booster().predict(X[INPUTS]), *F_LIMITS)
+    """Correction factor f (observed / physics) at the rows of X (inputs()), limited to f_limits."""
+    return np.clip(_booster().predict(X[input_names]), *f_limits)
+
+def correction_weight(lf):
+    """
+    Weight of the correction (lf: land_factors()): 1 on land; over water, the land upwind (1 - water_up, with the
+    distance weights of the upwind roughness, within 10 km) to the power w_power. Onshore wind gets no correction,
+    offshore wind does, fading over the first few km of water downwind of the coast; 0 over open sea.
+    """
+    land_upwind = np.clip(1 - lf['water_up'], 0, 1)
+    return np.where(lf['w'] >= 1, 1.0, land_upwind**w_power)
 
 def corrected_speed(spd, lf, terrain, lons2d, lats2d, lon_c, lat_c, heading_deg, tc):
     """
-    Physics wind speed spd (lat, lon) times the land correction at one time step (weight w**W_POWER;
-    points with no land weight or wind <= 0.5 m/s unchanged). tc: track values at this step (vmax, rmax, speed, lat,
-    d2l, t_overland).
+    Physics wind speed spd (lat, lon) times the land correction at one time step (weight correction_weight; points
+    with no weight or wind <= 0.5 m/s unchanged). tc: track values at this step (vmax, rmax, speed, lat, d2l, t_overland).
     """
-    sel = (lf['w'] > 0) & (spd > 0.5)
+    w = correction_weight(lf)
+    sel = (w > 0) & (spd > 0.5)
     if not sel.any():
         return spd
     r_km, azi = storm_geometry(lon_c, lat_c, heading_deg, lons2d[sel], lats2d[sel])
     X = inputs(r_km, azi, tc, {k: v[sel] for k, v in lf.items()}, spd[sel],
                {k: terrain[k][sel] for k in ('coast_km', 'z_dem', 'std5', 'tpi1')})
-    w = lf['w'][sel]**W_POWER
     out = spd.copy()
-    out[sel] = spd[sel]*(1 + w*(factor(X) - 1))
+    out[sel] = spd[sel]*(1 + w[sel]*(factor(X) - 1))
     return out

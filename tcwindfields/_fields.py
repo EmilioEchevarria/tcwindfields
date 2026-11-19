@@ -2,9 +2,8 @@ import numpy as np
 from ._utils import haversine_vectorized, coriolis
 from ._cle15 import ER11E04_nondim_rmaxinput
 
-_RHO_AIR = 1.15   # kg/m^3, Holland (1980)
-
-_CLE15_DEFAULTS = dict(Cdvary=0, C_d=1.5e-3, w_cool=2e-3, CkCdvary=0, CkCd=1, eye_adj=0, alpha_eye=0.15)
+_rho_air = 1.15   # kg/m^3, Holland (1980)
+_cle15_defaults = dict(Cdvary=0, C_d=1.5e-3, w_cool=2e-3, CkCdvary=0, CkCd=1, eye_adj=0, alpha_eye=0.15)
 
 
 def cle15_wind_profile(vmax_ms, rmax_km, lat, **kwargs):
@@ -23,7 +22,7 @@ def cle15_wind_profile(vmax_ms, rmax_km, lat, **kwargs):
     VV_ms : 1-D array, m/s
     r0_km : float, km
     """
-    p = {**_CLE15_DEFAULTS, **kwargs}
+    p = {**_cle15_defaults, **kwargs}
     fcor = coriolis(lat)
     if fcor == 0:
         fcor = 1e-5  # equatorial fallback
@@ -65,9 +64,7 @@ def holland_wind_profile(vmax_ms, pmin_hpa, rmax_km, lat, beta, p_env_hpa=1013.0
     rr_m = rr_km * 1000.0
 
     x = (rmax_m / rr_m) ** beta
-    VV = (np.sqrt(beta / _RHO_AIR * x * dp_pa * np.exp(-x)
-                  + (rr_m * fcor / 2.0) ** 2)
-          - rr_m * fcor / 2.0)
+    VV = (np.sqrt(beta / _rho_air * x * dp_pa * np.exp(-x) + (rr_m * fcor / 2.0) ** 2) - rr_m * fcor / 2.0)
     VV = np.maximum(VV, 0.0)
 
     # Rescale so the profile peak matches the observed vmax

@@ -8,9 +8,9 @@ through the turbulence intensity Iu) and with T0 (g: peak factor in 1 h, G_T0: c
 """
 import numpy as np
 
-GUST_S = 3.0  # s, WMO gust duration
+gust_s = 3.0  # s, WMO gust duration
 
-def peak_factor(tau=GUST_S, z=10.0):
+def peak_factor(tau=gust_s, z=10.0):
     """Peak factor g of a tau-s gust within 1 h (Eqns D.2-D.6)."""
     tu = 3.13*z**0.2  # s, integral time scale of the turbulence
     nu = (0.007 + 0.213*(tu/tau)**0.654)/tu  # Hz, zero-crossing rate
@@ -18,7 +18,7 @@ def peak_factor(tau=GUST_S, z=10.0):
     std_ratio = 1 - 0.193*(tu/tau + 0.1)**-0.68  # std of the tau-s wind / std of the wind
     return (s + 0.577/s)*std_ratio
 
-def gust_factor(z0, period_s=600.0, tau=GUST_S, z=10.0):
+def gust_factor(z0, period_s=600.0, tau=gust_s, z=10.0):
     """
     Gust factor G (Eqn D.10): highest tau-s gust expected within period_s (60 to 3600 s) / mean wind, for the
     upwind roughness length z0 (m). 3-s gust within 10 min: 1.66 for z0 = 0.18 m (in-land), 1.52 for 0.07 m
