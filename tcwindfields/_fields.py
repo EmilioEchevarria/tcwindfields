@@ -108,7 +108,7 @@ def wind_field_2d(rr_km, VV_ms, tc_lon, tc_lat, storm_spd_ms, storm_ang_math,
     vv = VV_ms[valid]
     max_rr = np.nanmax(rr)
 
-    # Background wind asymmetry (0.55 * storm speed, 20 deg left of motion)
+    # Background wind asymmetry (0.55 * storm speed, 20 deg clockwise of motion)
     # This was done following Wang, Lin and Gori (2022): 
     # "Investigation of Tropical Cyclone Wind Models With Application to Storm Tide Simulations"
     wnd_back = 0.55*storm_spd_ms

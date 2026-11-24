@@ -123,7 +123,7 @@ With `terrain=...`, `compute_tc_fields` changes the wind over land
 - **Elevation** (Copernicus DEM, 90m): speed-up on slopes facing the wind and on crests, slow-down in valleys, channelling along valleys, shelter behind steep upwind slopes, lower winds in rugged terrain.
 - **Inflow**: the wind turns towards the centre, by 37° inland and 22° with water upwind.
 
-The coefficients were fitted on station winds (GHCNh) near tropical cyclones, 2000-2025.
+The roughness lengths of the land cover classes are taken from Hazus (FEMA 2021). The land fetch and elevation coefficients were fitted on station winds (GHCNh, 2000-2025) near TCs.
 
 `terrain_features` reads the tiles around every grid point once. It is slow, so save the result and reuse it for every storm on that grid. It needs `rasterio` (`pip install tcwindfields[terrain]`) and the tiles in `terrain_dir/worldcover/` and `terrain_dir/cop_dem_90m/` (use `tcwf.download_terrain_tiles` to download them). It stops if a tile with land is missing (`tcwf.missing_tiles` lists them), since a missing tile would be read as sea.
 

@@ -20,17 +20,17 @@ import numpy as np
 import xarray as xr
 from tqdm import tqdm
 
-# ESA WorldCover 2021 v200 classes and roughness lengths z0 (m), fitted on station winds (water = z0_sea)
+# ESA WorldCover 2021 v200 classes and roughness lengths z0 (m), literature values (HAZUS land cover table, FEMA 2021; water = z0_sea). 
 wc_codes = (10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100)
 wc_names = ('tree', 'shrub', 'grass', 'crop', 'built', 'bare', 'snow', 'water', 'wetland', 'mangrove', 'moss')
-z0_class = {'tree': 1.1704, 'shrub': 0.4283, 'grass': 0.1343, 'crop': 0.3362, 'built': 0.5153, 'bare': 0.0128,
-            'snow': 0.001, 'water': None, 'wetland': 2.5149, 'mangrove': 0.565, 'moss': 0.01}
+z0_class = {'tree': 0.6, 'shrub': 0.12, 'grass': 0.06, 'crop': 0.05, 'built': 1.0, 'bare': 0.01,
+            'snow': 0.001, 'water': None, 'wetland': 0.05, 'mangrove': 0.5, 'moss': 0.01}
 z0_sea = 0.0013  # m, marine roughness (HAZUS)
 h_bl = 600.0  # m, height where the wind is unchanged from sea to land
 ring_edges_km = (0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0)
 fetch_x0_m, fetch_xmax_km = 10.0, 20.0  # distance weights ln(x/x0)/ln(xmax/x0) (~60% within 1 km)
-land_fetch_km, land_fetch_gamma = 50.0, -0.238  # wind x exp(gamma x land fraction within 50 km upwind)
-topo_coef = {'s_along': 2.3949, 's_across': 1.4201, 'sx_pos': -0.02122, 'rug': -0.05447}
+land_fetch_km, land_fetch_gamma = 50.0, -0.2824  # wind x exp(gamma x land fraction within 50 km upwind)
+topo_coef = {'s_along': 2.8849, 's_across': 0.8860, 'sx_pos': -0.03323, 'rug': -0.04859}  # fitted with gamma
 topo_cap = (0.5, 1.71)  # limits of the topographic factor (upper": flow separation, AS/NZS 1170.2)
 topo_z_eff, topo_r_avg, topo_half_km = 400.0, 500.0, 10.0    # m, m, km
 inflow_sea, inflow_land = 22.0, 37.0  # deg, inflow angle with water upwind / inland
