@@ -36,8 +36,8 @@ def bearing_met(lat0, lon0, lat1, lon1):
 
 def track_land(lons, lats, times, box_deg=10.0, cap_km=1500.0):
     """
-    Along the track, from the ERA5 land-sea mask: distance (km) from the centre to land (0 when the centre is over
-    land: mask >= 0.5) and hours since the centre was last over water (since the start if never).
+    Along the track, from the land-sea mask: distance (km) from the centre to land 
+    (0 when the centre is over land: mask >= 0.5) and hours since the centre was last over water (since the start if never).
     """
     lons, lats = np.asarray(lons, float), np.asarray(lats, float)
     t = np.asarray(times, dtype='datetime64[s]').astype(float)

@@ -2,7 +2,7 @@
 Land effects on the 10m wind
 
   roughness   upwind, distance-weighted roughness length z0 from the land cover (ESA WorldCover 2021)
-  land fetch  lower winds the more land the wind has crossed within 50 km upwind (ERA5 land-sea mask)
+  land fetch  lower winds the more land the wind has crossed within 50 km upwind (GSHHG land-sea mask, 0.02 deg)
   topography  speed-up on slopes facing the wind and on crests, slow-down in valleys, channelling along
               valleys (linear potential flow over the Copernicus DEM, Jackson & Hunt 1975), shelter
               behind steep upwind slopes, and lower winds in rugged terrain
@@ -29,8 +29,8 @@ z0_sea = 0.0013  # m, marine roughness (HAZUS)
 h_bl = 600.0  # m, height where the wind is unchanged from sea to land
 ring_edges_km = (0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0)
 fetch_x0_m, fetch_xmax_km = 10.0, 20.0  # distance weights ln(x/x0)/ln(xmax/x0) (~60% within 1 km)
-land_fetch_km, land_fetch_gamma = 50.0, -0.2824  # wind x exp(gamma x land fraction within 50 km upwind)
-topo_coef = {'s_along': 2.8849, 's_across': 0.8860, 'sx_pos': -0.03323, 'rug': -0.04859}  # fitted with gamma
+land_fetch_km, land_fetch_gamma = 50.0, -0.2395  # wind x exp(gamma x land fraction within 50 km upwind)
+topo_coef = {'s_along': 2.8062, 's_across': 0.9626, 'sx_pos': -0.02770, 'rug': -0.04940}  # fitted with gamma
 topo_cap = (0.5, 1.71)  # limits of the topographic factor (upper": flow separation, AS/NZS 1170.2)
 topo_z_eff, topo_r_avg, topo_half_km = 400.0, 500.0, 10.0    # m, m, km
 inflow_sea, inflow_land = 22.0, 37.0  # deg, inflow angle with water upwind / inland
@@ -39,7 +39,7 @@ km_per_deg = 111.2
 
 _wc_url = 'https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_{tile}_Map.tif'
 _dem_url = 'https://copernicus-dem-90m.s3.amazonaws.com/{name}/{name}.tif'
-lsm_file = pathlib.Path(__file__).resolve().parent.parent/'assets'/'era5_land_sea_mask.nc'
+lsm_file = pathlib.Path(__file__).resolve().parent.parent/'assets'/'land_sea_mask_gshhg_0.02deg.nc'
 _no_tile = 'no_tile.txt'  # tiles that do not exist on the server (ocean), written by download_terrain_tiles
 
 _lut = np.full(256, wc_names.index('water'), dtype=np.int64)  # no data / unknown codes = water (ocean)
@@ -95,11 +95,10 @@ def terrain_tiles(lons_grid, lats_grid):
 
 def missing_tiles(lons_grid, lats_grid, terrain_dir):
     """
-    Tiles the grid needs that are not in terrain_dir although the ERA5 land-sea mask has land in them
+    Tiles the grid needs that are not in terrain_dir although the land-sea mask has land in them
     """
     la0, la1, lo0, lo1 = _grid_box(lons_grid, lats_grid)
-    m = xr.open_dataset(lsm_file)['lsm']
-    lsm, la_g, lo_g = m.values, m['latitude'].values, m['longitude'].values
+    la_g, lo_g, lsm, _ = _lsm()
     out = []
     for sub, name, _, a, b, size in _tiles(lons_grid, lats_grid):
         d = pathlib.Path(terrain_dir)/sub
@@ -336,31 +335,43 @@ def _one_point(args):
 
 @lru_cache(maxsize=1)
 def _lsm():
-    """ERA5 land-sea mask (lsm_file): latitudes (ascending), longitudes, field."""
-    m = xr.open_dataset(lsm_file)['lsm'].load()
-    return m['latitude'].values.astype(float), m['longitude'].values.astype(float), m.values.astype(float)
+    """
+    Land-sea mask (lsm_file): latitudes, longitudes, field as stored and the scale to a land fractio.
+    """
+    with xr.open_dataset(lsm_file) as ds:
+        name, scale = ('land_pct', 0.01) if 'land_pct' in ds else ('lsm', 1.0)
+        m = ds[name].load()
+    field = m.values if m.dtype == np.uint8 else m.values.astype(float)
+    return m['latitude'].values.astype(float), m['longitude'].values.astype(float), field, scale
 
 def _lsm_bilinear(plat, plon):
-    """ERA5 land-sea mask (lsm_file) bilinearly interpolated at points."""
-    la_g, lo_g, field = _lsm()
+    """Land fraction of the land-sea mask (lsm_file) bilinearly interpolated at points."""
+    la_g, lo_g, field, scale = _lsm()
     fy = (np.asarray(plat, float) - la_g[0])/(la_g[1] - la_g[0])
     j0 = np.clip(np.floor(fy).astype(int), 0, len(la_g) - 2)
     wy = np.clip(fy - j0, 0.0, 1.0)
     fx = ((np.asarray(plon, float) - lo_g[0]) % 360.0)/(lo_g[1] - lo_g[0])
     i0 = np.floor(fx).astype(int) % len(lo_g)
     i1, wx = (i0 + 1) % len(lo_g), fx - np.floor(fx)
-    return (1 - wy)*((1 - wx)*field[j0, i0] + wx*field[j0, i1]) + wy*((1 - wx)*field[j0 + 1, i0] + wx*field[j0 + 1, i1])
+    return scale*((1 - wy)*((1 - wx)*field[j0, i0] + wx*field[j0, i1])
+                  + wy*((1 - wx)*field[j0 + 1, i0] + wx*field[j0 + 1, i1]))
 
-def _lsm_coast_km(lat, lon, land_point, max_km=300.0, step_km=5.0):
-    """Distance (km) to the sea (land-sea mask < 0.5) along 8 directions, 0 on water points, max_km + step if none."""
+def _lsm_coast_km(lat, lon, land_point, max_km=300.0, step_km=1.0, chunk=2000):
+    """
+    Distance (km) to the sea (land fraction < 0.5) along 8 directions, 0 on water points, max_km + step if none.
+    """
+    lat, lon, land_point = np.atleast_1d(lat), np.atleast_1d(lon), np.atleast_1d(land_point)
     dists = np.arange(step_km, max_km + 0.1*step_km, step_km)
-    prof = _lsm_profile(lat, lon, dists, rays=3).mean(axis=2)  # (point, sector, dist)
-    sea = prof < 0.5
-    first = np.where(sea.any(-1), dists[np.argmax(sea, axis=-1)], max_km + step_km)
-    return np.where(land_point, first.min(axis=1), 0.0)
+    out = np.zeros(len(lat))
+    for c in range(0, len(lat), chunk):
+        s = slice(c, c + chunk)
+        sea = _lsm_profile(lat[s], lon[s], dists, rays=3).mean(axis=2) < 0.5  # (point, sector, dist)
+        first = np.where(sea.any(-1), dists[np.argmax(sea, axis=-1)], max_km + step_km)
+        out[s] = np.where(land_point[s], first.min(axis=1), 0.0)
+    return out
 
 def _lsm_land_fraction(lat, lon, radius_km=land_fetch_km, step_km=5.0):
-    """Mean land fraction (ERA5 land-sea mask) within radius_km upwind of each point: (point, sector)."""
+    """Mean land fraction (land-sea mask) within radius_km upwind of each point: (point, sector)."""
     dists = np.arange(step_km, radius_km + 0.1*step_km, step_km)
     return _lsm_profile(lat, lon, dists).mean(axis=(2, 3))
 
@@ -420,9 +431,9 @@ def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
              'sx1': 'steepest upwind slope angle within 1 km (deg; > 0 sheltered)',
              'std5': 'std of the elevation within 5 km (m; ruggedness)',
              's_along': 'potential-flow speed-up, along the wind', 's_across': 'potential-flow speed-up, across',
-             'land_up': f'land fraction within {land_fetch_km:g} km upwind (ERA5 land-sea mask)',
+             'land_up': f'land fraction within {land_fetch_km:g} km upwind (land-sea mask)',
              'z_dem': 'DEM elevation at the point (m)', 'tpi1': 'elevation minus the mean within 1 km (m; > 0 hilltop)',
-             'coast_km': 'distance to the sea (km; ERA5 land-sea mask, 0 on water points)'}
+             'coast_km': 'distance to the sea (km; land-sea mask, 0 on water points)'}
     for k, v in attrs.items():
         ds[k].attrs['long_name'] = v
     ds['sector'].attrs = {'units': 'degree', 'long_name': 'upwind sector centre (wind FROM)'}

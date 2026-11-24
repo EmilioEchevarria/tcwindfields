@@ -119,7 +119,7 @@ Main function. Returns an `xr.Dataset` with dimensions `(time, lat, lon)`.
 With `terrain=...`, `compute_tc_fields` changes the wind over land
 
 - **Surface roughness**: rougher ground (forest, towns) slows the 10m wind more than smooth ground (grass, water). The roughness is taken from the land cover upwind (ESA WorldCover 2021).
-- **Land fetch**: the more land the wind has crossed within 50 km upwind, the lower the wind (ERA5 land-sea mask).
+- **Land fetch**: the more land the wind has crossed within 50 km upwind, the lower the wind. The land-sea mask (`assets/land_sea_mask_gshhg_0.02deg.nc`) was made from the GSHHG v2.3.7 full res shorelines (Wessel & Smith 1996, LGPL), with lakes of >500 km^2 as water.
 - **Elevation** (Copernicus DEM, 90m): speed-up on slopes facing the wind and on crests, slow-down in valleys, channelling along valleys, shelter behind steep upwind slopes, lower winds in rugged terrain.
 - **Inflow**: the wind turns towards the centre, by 37° inland and 22° with water upwind.
 
@@ -178,4 +178,5 @@ Print a summary of all required input units and default model parameters.
 - Troen, I., & Petersen, E. L. (1989). *European Wind Atlas*. Risø National Laboratory (WAsP).
 - FEMA (2021). *Hazus Hurricane Model Technical Manual* (sea-land roughness transition).
 - Zanaga, D., et al. (2022). ESA WorldCover 10 m 2021 v200. doi:10.5281/zenodo.7254221.
+- Wessel, P., & Smith, W. H. F. (1996). A global, self-consistent, hierarchical, high-resolution shoreline database. *Journal of Geophysical Research*, 101(B4), 8741-8743 (GSHHG v2.3.7, LGPL).
 - Harper, B. A., Kepert, J. D., & Ginger, J. D. (2010). *Guidelines for converting between various wind averaging periods in tropical cyclone conditions*. WMO/TD-No. 1555, World Meteorological Organization.
