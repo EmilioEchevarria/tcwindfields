@@ -5,7 +5,7 @@ import xarray as xr
 from scipy.interpolate import interp1d
 from tqdm import tqdm
 
-from ._utils import storm_motion, coriolis
+from ._utils import storm_motion
 from ._fields import cle15_wind_profile, holland_wind_profile, wind_field_2d
 from ._holland import beta_model, calc_pressure_profile, pressure_field_2d
 from ._terrain import land_effects, z0_sea

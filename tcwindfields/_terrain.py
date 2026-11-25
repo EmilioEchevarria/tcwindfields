@@ -31,7 +31,7 @@ ring_edges_km = (0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0)
 fetch_x0_m, fetch_xmax_km = 10.0, 20.0  # distance weights ln(x/x0)/ln(xmax/x0) (~60% within 1 km)
 land_fetch_km, land_fetch_gamma = 50.0, -0.2395  # wind x exp(gamma x land fraction within 50 km upwind)
 topo_coef = {'s_along': 2.8062, 's_across': 0.9626, 'sx_pos': -0.02770, 'rug': -0.04940}  # fitted with gamma
-topo_cap = (0.5, 1.71)  # limits of the topographic factor (upper": flow separation, AS/NZS 1170.2)
+topo_cap = (0.5, 1.71)  # limits of the topographic factor (upper: flow separation, AS/NZS 1170.2)
 topo_z_eff, topo_r_avg, topo_half_km = 400.0, 500.0, 10.0    # m, m, km
 inflow_sea, inflow_land = 22.0, 37.0  # deg, inflow angle with water upwind / inland
 topo_axes = (0.0, 45.0, 90.0, 135.0)  # wind axes
@@ -98,7 +98,7 @@ def missing_tiles(lons_grid, lats_grid, terrain_dir):
     Tiles the grid needs that are not in terrain_dir although the land-sea mask has land in them
     """
     la0, la1, lo0, lo1 = _grid_box(lons_grid, lats_grid)
-    la_g, lo_g, lsm, _ = _lsm()
+    la_g, lo_g, lsm = _lsm()
     out = []
     for sub, name, _, a, b, size in _tiles(lons_grid, lats_grid):
         d = pathlib.Path(terrain_dir)/sub
@@ -335,26 +335,21 @@ def _one_point(args):
 
 @lru_cache(maxsize=1)
 def _lsm():
-    """
-    Land-sea mask (lsm_file): latitudes, longitudes, field as stored and the scale to a land fractio.
-    """
+    """Land-sea mask (lsm_file): latitudes, longitudes and the land percentage (uint8)."""
     with xr.open_dataset(lsm_file) as ds:
-        name, scale = ('land_pct', 0.01) if 'land_pct' in ds else ('lsm', 1.0)
-        m = ds[name].load()
-    field = m.values if m.dtype == np.uint8 else m.values.astype(float)
-    return m['latitude'].values.astype(float), m['longitude'].values.astype(float), field, scale
+        m = ds['land_pct'].load()
+    return m['latitude'].values.astype(float), m['longitude'].values.astype(float), m.values
 
 def _lsm_bilinear(plat, plon):
     """Land fraction of the land-sea mask (lsm_file) bilinearly interpolated at points."""
-    la_g, lo_g, field, scale = _lsm()
+    la_g, lo_g, field = _lsm()
     fy = (np.asarray(plat, float) - la_g[0])/(la_g[1] - la_g[0])
     j0 = np.clip(np.floor(fy).astype(int), 0, len(la_g) - 2)
     wy = np.clip(fy - j0, 0.0, 1.0)
     fx = ((np.asarray(plon, float) - lo_g[0]) % 360.0)/(lo_g[1] - lo_g[0])
     i0 = np.floor(fx).astype(int) % len(lo_g)
     i1, wx = (i0 + 1) % len(lo_g), fx - np.floor(fx)
-    return scale*((1 - wy)*((1 - wx)*field[j0, i0] + wx*field[j0, i1])
-                  + wy*((1 - wx)*field[j0 + 1, i0] + wx*field[j0 + 1, i1]))
+    return 0.01*((1 - wy)*((1 - wx)*field[j0, i0] + wx*field[j0, i1]) + wy*((1 - wx)*field[j0 + 1, i0] + wx*field[j0 + 1, i1]))
 
 def _lsm_coast_km(lat, lon, land_point, max_km=300.0, step_km=1.0, chunk=2000):
     """
@@ -393,7 +388,8 @@ def terrain_features(lons_grid, lats_grid, terrain_dir, n_procs=1):
     Run it once per grid and save it (to_netcdf).
 
     terrain_dir: folder with worldcover/ (ESA WorldCover 2021 v200 tiles) and cop_dem_90m/ (Copernicus GLO-90)
-    Returns xr.Dataset (lat, lon[, sector]): ln_z0, water_up, land_up, s_along, s_across, sx1 (sector, wind FROM), std5, land_weight.
+    Returns xr.Dataset (lat, lon[, sector]): ln_z0, water_up, land_up, s_along, s_across, sx1 (sector, wind FROM),
+    std5, land_weight, z_dem, tpi1, coast_km.
     """
     miss = missing_tiles(lons_grid, lats_grid, terrain_dir)
     if miss:
@@ -482,7 +478,7 @@ def land_effects(U, V, terrain, tc_lat, correction=None):
     Wind (U, V: lat x lon, m/s) with the land effects: the direction turned inward (inflow)
     and the speed times roughness x land fetch x topography (weighted by the land weight).
     correction: optional function (speed, land_factors) --> speed, applied after (statistical land correction).
-    Returns U, V and the upwind roughness length z0 (m, for the wnd gust).
+    Returns U, V and the upwind roughness length z0 (m, for the wind gust).
     """
     lf = land_factors(U, V, terrain, tc_lat)
     spd = np.hypot(U, V)*(1 + lf['w']*(lf['m_rough']*lf['m_fetch']*lf['m_topo'] - 1))

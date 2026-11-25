@@ -1,9 +1,6 @@
 # /usr/bin/env python
 import numpy as np
-import sys
 import copy
-from shapely.geometry import LineString
-from scipy.optimize import fsolve
 from scipy.interpolate import interp1d, PchipInterpolator
 
 
