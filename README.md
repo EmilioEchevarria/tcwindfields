@@ -139,7 +139,7 @@ ds = tcwf.compute_tc_fields(time_tc, lons_tc, lats_tc, vmax_tc, pmin_tc, rmax_tc
 ## Statistical land correction (optional): 
 ### --> tcwf.compute_tc_fields(..., terrain=terr, land_correction=True)
 
-On top of the physics above, a factor on the wind over land learned from station observations: gradient-boosted decision trees (LightGBM, model in `assets/land_correction.txt`) trained on GHCNh station winds near TCs (2000-2025). Its 19 inputs come from the track (dist from the centre, bearing, Vmax, Rmax, forward speed, lat, time it's been over land, dist2land, wind) and the terrain (upwind roughness and water, dist2coast, elevation, ruggedness, shelter, the hill and roughness factors). It corrects storm-scale errors over land that the physics does not. Over water it only acts when the wind comes from land (offshore wind), fading over the first few km of water, so onshore wind near the coast and the wind over open sea are unchanged. It needs `lightgbm`, and a terrain file from `terrain_features` 
+On top of the physics above, a factor on the wind over land learned from station observations: gradient-boosted decision trees (LightGBM, model in `assets/land_correction.txt`) trained on GHCNh station winds near TCs (2000-2025). Its 19 inputs come from the track (dist from the centre, bearing, Vmax, Rmax, forward speed, lat, time it's been over land, dist2land, wind) and the terrain (upwind roughness and water, dist2coast, elevation, ruggedness, shelter, the hill and roughness factors). It corrects storm-scale errors over land that the physics does not. It needs `lightgbm`, and a terrain file from `terrain_features` 
 
 
 ## Wind gusts (optional):

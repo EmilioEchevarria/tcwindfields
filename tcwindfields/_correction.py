@@ -2,10 +2,12 @@
 Statistical land correction (optional: compute_tc_fields(..., terrain=..., land_correction=True)).
 
 A factor f on the wind over land, predicted by gradient-boosted decision trees (LightGBM) from 19 inputs computed
-from the track and the terrain at each point. Trained on station winds near TCs (GHCNh 2000-2025).
-Applied with a weight w, 1 on land and the land upwind over water (see correction_weight), so the wind over open sea
-and with onshore wind over water is unchanged:
-    wind = physics x (1 + w**w_power (f - 1))
+from the track and the terrain at each point. Trained on station winds near TCs (GHCNh 2000-2025), with a loss that
+also matches the distribution of the storm maxima at the stations (so the correction keeps the peaks of the physics,
+a plain squared error smooths them).
+Applied with a weight w, the land upwind (see correction_weight), so the correction fades in over the first km of
+land after the TC makes landfall, and the wind over open sea and with onshore wind over water is unchanged:
+    wind = physics x (1 + w (f - 1))
 """
 import pathlib
 
@@ -16,7 +18,6 @@ from ._utils import haversine_vectorized
 from ._terrain import _lsm_bilinear
 
 model_file = pathlib.Path(__file__).resolve().parent.parent/'assets'/'land_correction.txt'
-w_power = 1.0  # weight over water: (land upwind)**w_power; the model is fitted with it (E52)
 f_limits = (0.2, 3.0)
 input_names = ['r_rmax', 'r_km', 'azi_strong', 'tc_vmax', 'tc_speed', 'abs_lat', 't_overland_h', 'tc_d2l', 'rmax',
           'ln_wind', 'z0_up', 'water_up', 'coast_km', 'z_dem', 'std5', 'tpi1', 'sx1_up', 'm_topo', 'm_terrain']
@@ -81,12 +82,11 @@ def factor(X):
 
 def correction_weight(lf):
     """
-    Weight of the correction (lf: land_factors()): 1 on land; over water, the land upwind (1 - water_up, with the
-    distance weights of the upwind roughness, within 10 km) to the power w_power. Onshore wind gets no correction,
-    offshore wind does, fading over the first few km of water downwind of the coast; 0 over open sea.
+    Weight of the correction (lf: land_factors()): the land upwind (1 - water_up), on land and over water, 0 over open sea. 
+    A TC that has just made landfall gets little correction,  which grows over the first km of land fetch
     """
     land_upwind = np.clip(1 - lf['water_up'], 0, 1)
-    return np.where(lf['w'] >= 1, 1.0, land_upwind**w_power)
+    return np.where(lf['w'] > 0, land_upwind, 0.0)
 
 def corrected_speed(spd, lf, terrain, lons2d, lats2d, lon_c, lat_c, heading_deg, tc):
     """
